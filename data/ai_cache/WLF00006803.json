@@ -1,0 +1,52 @@
+{
+ "model": "gpt-5.6-luna",
+ "extract": {
+  "online": false,
+  "visit_required": true,
+  "agencies": [
+   "신청"
+  ],
+  "conditions": [
+   {
+    "type": "소득",
+    "text": "기준중위소득 120%이내"
+   },
+   {
+    "type": "장애",
+    "text": "장애인 가족"
+   },
+   {
+    "type": "거주지",
+    "text": "관내"
+   }
+  ],
+  "documents": [
+   "신청서",
+   "개인정보제공 및 활용동의서",
+   "등본",
+   "통장사본"
+  ]
+ },
+ "easy": {
+  "who": "관내 저소득층인 장애인 가족이 받을 수 있어요.",
+  "conditions": [
+   "기준 중위소득 120% 이내여야 해요."
+  ],
+  "what": "가구당 30만원 이내로 지원해요.",
+  "steps": [
+   "읍면사무소에 방문해요.",
+   "신청서를 내요.",
+   "개인정보 제공 및 활용 동의서를 내요.",
+   "등본을 내요.",
+   "통장사본을 내요."
+  ]
+ },
+ "check": {
+  "total": 2,
+  "kept": 2,
+  "missing": [],
+  "ok": true
+ },
+ "attempts": 1,
+ "needs_review": false
+}
