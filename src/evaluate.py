@@ -44,6 +44,21 @@ def _read_gold(path: Path) -> dict:
     return gold
 
 
+def gold_mix() -> dict:
+    """정답표가 어떻게 만들어졌는지 건수(메모 칸 표시 기준)."""
+    mix = {"사람 검수": 0, "AI 재검토": 0, "사람 작성": 0}
+    for p in sorted(EVAL.glob("gold*.csv")):
+        if p.name == "gold_template.csv":
+            continue
+        with open(p, encoding="utf-8-sig") as f:
+            for row in csv.DictReader(f):
+                memo = row.get("메모", "")
+                if not row.get("online", "").strip() or "AI 초안(검수 전)" in memo:
+                    continue
+                mix["사람 검수" if "사람 검수" in memo else "AI 재검토" if "AI 재검토" in memo else "사람 작성"] += 1
+    return mix
+
+
 def compare(pred: dict, ref: dict) -> dict:
     """pred, ref: {servId: summarize() 결과}. 항목별 일치율(%)과 수치 항목의 평균 오차."""
     ids = [i for i in ref if i in pred]

@@ -144,6 +144,8 @@ with tab4:
     gold = evaluate.load_gold()
     if gold:
         st.subheader(f"정답표 {len(gold)}건과 비교 (일치율 %)")
+        mix = evaluate.gold_mix()
+        st.caption(f"정답표 구성: AI 초안을 사람이 검수 {mix['사람 검수']}건 · AI가 작성·재검토 {mix['AI 재검토']}건 (기준: eval/README.md)")
         st.caption("기준표(규칙): 점수 계산에 쓰는 값이 맞는지 확인. AI: 신청 보조의 서류·조건 안내가 맞는지 확인하고, 단순 규칙보다 얼마나 정확한지 보여 줍니다.")
         r_cmp, a_cmp = evaluate.compare(rule_sum, gold), evaluate.compare(ai_sum, gold)
         st.dataframe(pd.DataFrame({
