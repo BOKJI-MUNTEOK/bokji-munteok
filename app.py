@@ -1,4 +1,4 @@
-"""복지온길 시연 화면. 실행: .venv/bin/python -m streamlit run app.py"""
+"""복지문턱 시연 화면. 실행: .venv/bin/python -m streamlit run app.py"""
 import re
 import sys
 from pathlib import Path
@@ -21,7 +21,7 @@ import score
 from parse import load_all
 from pipeline import build
 
-BRAND = "복지온길"
+BRAND = "복지문턱"
 LOGO = Path(__file__).resolve().parent / "assets" / "logo"
 st.set_page_config(page_title=BRAND, page_icon="🛤️", layout="wide")
 st.markdown("""

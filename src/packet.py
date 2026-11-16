@@ -52,7 +52,7 @@ class _Doc(FPDF):
         self.set_y(-13)
         self.set_font("NG", "", 8)
         self.set_text_color(120)
-        self.cell(0, 5, "복지온길 작성 도우미 · 공식 서식이 아닙니다 · 기관 신청서에 옮겨 쓰거나 상담 때 보여 주세요", align="C")
+        self.cell(0, 5, "복지문턱 작성 도우미 · 공식 서식이 아닙니다 · 기관 신청서에 옮겨 쓰거나 상담 때 보여 주세요", align="C")
 
     def top(self, text, sub=""):
         self.set_font("NG", "B", 18)
