@@ -127,7 +127,7 @@ AI 예측이 아니라 정해진 항목을 더하는 방식이라, 점수마다 
 자세한 내용은 [CONTRIBUTING.md](CONTRIBUTING.md)에 있습니다. 핵심만 적습니다.
 
 - `main`에 직접 push하지 않고, `맡은일/할일` 브랜치(예: `data/collect-api`, `app/score-page`)를 만들어 PR로 합칩니다.
-- PR은 다른 팀원 1명이 확인한 뒤 Squash and merge로 합칩니다.
+- PR은 본인이 직접 Squash and merge로 합칩니다. 확인이 필요할 때만 단톡에 링크를 올립니다.
 - API 키는 `.env`에만 넣고 커밋하지 않습니다. 큰 원본 데이터는 `data/raw/`에 두며 올리지 않습니다.
 - 할 일은 GitHub Issues로 나누고 맡는 사람을 지정합니다.
 

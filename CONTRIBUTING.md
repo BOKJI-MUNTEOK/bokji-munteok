@@ -28,7 +28,7 @@ git commit -m "data: 중앙·지자체 서비스 전체 받기"
 git push -u origin data/collect-api
 ```
 
-GitHub에서 PR을 열고 다른 팀원 1명이 확인하면 합칩니다(Squash and merge). 합친 브랜치는 지웁니다.
+GitHub에서 PR을 열고 본인이 직접 합칩니다(Squash and merge). 검토는 필수가 아니지만, 남의 코드를 건드렸거나 확인이 필요하면 단톡에 PR 링크를 올립니다. 합친 브랜치는 지웁니다.
 
 브랜치 이름은 `맡은일/할일`로 짓습니다.
 
