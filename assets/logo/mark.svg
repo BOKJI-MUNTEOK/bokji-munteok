@@ -1,7 +1,7 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120">
-  <defs><linearGradient id="g" x1="0" y1="1" x2="1" y2="0">
-    <stop offset="0" stop-color="#063A74"/><stop offset="1" stop-color="#256EF4"/></linearGradient></defs>
-  <rect width="120" height="120" rx="28" fill="url(#g)"/>
-  <path d="M30 94 C30 64, 90 72, 90 42" fill="none" stroke="#fff" stroke-width="11" stroke-linecap="round"/>
-  <circle cx="90" cy="30" r="9" fill="#FFC94D"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="16 14 88 92">
+  <g fill="none" stroke="#191F28" stroke-width="7" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M38 92 V22 H82 V92"/>          <!-- 문틀 -->
+    <path d="M38 22 L66 32 V100 L38 92"/>   <!-- 살짝 열린 문 -->
+    <path d="M22 96 H98" stroke="#256EF4"/> <!-- 낮은 문턱 -->
+  </g>
 </svg>
