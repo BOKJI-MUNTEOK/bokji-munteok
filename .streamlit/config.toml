@@ -2,4 +2,14 @@
 gatherUsageStats = false
 
 [theme]
-primaryColor = "#C8102E"
+base = "light"
+# 공공 서비스 느낌: 정부 디자인 시스템(KRDS) 기본 파랑 + 흰 바탕, 공공기관용 Pretendard GOV 글꼴
+primaryColor = "#256EF4"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F4F5F6"
+textColor = "#1E2124"
+borderColor = "#DDE1E6"
+showWidgetBorder = true
+baseRadius = "0.5rem"
+font = "Pretendard GOV Variable:https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-gov-dynamic-subset.min.css"
+chartCategoricalColors = ["#256EF4", "#063A74", "#F5A623", "#6FA8FF", "#8A94A6", "#2BA36B"]

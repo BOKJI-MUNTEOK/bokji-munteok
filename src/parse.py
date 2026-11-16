@@ -27,6 +27,7 @@ def parse_central(path: Path) -> dict:
     for a in r.iter("applmetList"):
         agencies.append({"stage": _t(a, "servSeDetailNm"), "desc": _t(a, "servSeDetailLink")})
     forms = [_t(f, "servSeDetailNm") for f in r.iter("basfrmList")]
+    files = [{"name": _t(f, "servSeDetailNm"), "url": _t(f, "servSeDetailLink")} for f in r.iter("basfrmList")]
     return {
         "src": "중앙",
         "servId": _t(r, "servId"),
@@ -39,6 +40,7 @@ def parse_central(path: Path) -> dict:
         "summary": _t(r, "wlfareInfoOutlCn"),
         "agencies": agencies,
         "forms": sorted(set(forms)),
+        "form_files": files,  # 첨부 양식·공고문 내려받기 주소(복지로)
         "online_flag": None,  # 목록 응답(onapPsbltYn)에서 채운다
         "apply_method_name": "",
         "contact": _t(r, "rprsCtadr"),
@@ -48,6 +50,7 @@ def parse_central(path: Path) -> dict:
 def parse_local(path: Path) -> dict:
     r = ET.parse(path).getroot()
     forms = [_t(f, "wlfareInfoReldNm") for f in r.iter("basfrmList")]
+    files = [{"name": _t(f, "wlfareInfoReldNm"), "url": _t(f, "wlfareInfoReldCn")} for f in r.iter("basfrmList")]
     region = " ".join(x for x in (_t(r, "ctpvNm"), _t(r, "sggNm")) if x)
     return {
         "src": "지자체",
@@ -61,14 +64,21 @@ def parse_local(path: Path) -> dict:
         "summary": _t(r, "servDgst"),
         "agencies": [],
         "forms": sorted(set(f for f in forms if f)),
+        "form_files": [f for f in files if f["name"] and f["url"]],
         "online_flag": None,
         "apply_method_name": _t(r, "aplyMtdNm"),
         "contact": "; ".join(_t(c, "wlfareInfoReldCn") for c in r.iter("inqplCtadrList")),
     }
 
 
+def _tags(el, *tags) -> list[str]:
+    """'청년, 노년' 같은 쉼표 목록. 중앙은 lifeArray, 지자체는 lifeNmArray처럼 이름이 다르다."""
+    text = ",".join(_t(el, t) for t in tags)
+    return [x.replace(" · ", "·").strip() for x in text.split(",") if x.strip()]
+
+
 def _list_meta(path: Path) -> dict:
-    """목록 응답에만 있는 값(중앙 onapPsbltYn, 지자체 aplyMtdNm, 지역)."""
+    """목록 응답에만 있는 값(중앙 onapPsbltYn, 지자체 aplyMtdNm, 지역, 생애주기·대상·주제 태그)."""
     meta = {}
     if not path.exists():
         return meta
@@ -77,8 +87,21 @@ def _list_meta(path: Path) -> dict:
             "onapPsbltYn": _t(s, "onapPsbltYn"),
             "aplyMtdNm": _t(s, "aplyMtdNm"),
             "region": " ".join(x for x in (_t(s, "ctpvNm"), _t(s, "sggNm")) if x),
+            "sido": _t(s, "ctpvNm"),
+            "sgg": _t(s, "sggNm"),
+            "life": _tags(s, "lifeArray", "lifeNmArray"),
+            "groups": _tags(s, "trgterIndvdlArray", "trgterIndvdlNmArray"),
+            "themes": _tags(s, "intrsThemaArray", "intrsThemaNmArray"),
+            "link": _t(s, "servDtlLink"),
         }
     return meta
+
+
+def _add_tags(d: dict, m: dict) -> None:
+    for k in ("sido", "sgg", "link"):
+        d[k] = m.get(k, "")
+    for k in ("life", "groups", "themes"):
+        d[k] = m.get(k, [])
 
 
 def load_all(raw: Path = RAW) -> list[dict]:
@@ -91,6 +114,7 @@ def load_all(raw: Path = RAW) -> list[dict]:
         m = cmeta.get(d["servId"], {})
         d["online_flag"] = {"Y": True, "N": False}.get(m.get("onapPsbltYn", ""))
         d["region"] = "전국"
+        _add_tags(d, m)
         out.append(d)
     for p in sorted(raw.glob("local_*.xml")):
         if p.name == "local_list.xml":
@@ -99,6 +123,7 @@ def load_all(raw: Path = RAW) -> list[dict]:
         m = lmeta.get(d["servId"], {})
         d["apply_method_name"] = d["apply_method_name"] or m.get("aplyMtdNm", "")
         d["region"] = m.get("region", "")
+        _add_tags(d, m)
         out.append(d)
     return out
 
