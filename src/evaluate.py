@@ -6,7 +6,8 @@ eval/gold.csv 열: servId, online(Y/N), visit_required(Y/N), n_agencies, n_condi
 import csv
 from pathlib import Path
 
-GOLD = Path(__file__).resolve().parent.parent / "eval" / "gold.csv"
+EVAL = Path(__file__).resolve().parent.parent / "eval"
+GOLD = EVAL / "gold.csv"
 FIELDS = ["online", "visit_required", "n_agencies", "n_conditions", "n_documents"]
 LABELS = {"online": "온라인 가능", "visit_required": "방문 필수", "n_agencies": "기관 수",
           "n_conditions": "조건 수", "n_documents": "서류 수"}
@@ -19,20 +20,43 @@ def summarize(ext: dict) -> dict:
             "n_documents": len(docs) if docs else None}
 
 
-def load_gold(path: Path = GOLD) -> dict:
-    if not path.exists():
-        return {}
+def load_gold(path: Path | None = None) -> dict:
+    """path를 주면 그 파일만, 안 주면 eval/gold.csv와 사람별 eval/gold_*.csv(틀 제외)를 합쳐 읽는다."""
+    paths = [path] if path else sorted(p for p in EVAL.glob("gold*.csv") if p.name != "gold_template.csv")
+    gold = {}
+    for p in paths:
+        if p.exists():
+            gold.update(_read_gold(p))
+    return gold
+
+
+def _read_gold(path: Path) -> dict:
     gold = {}
     with open(path, encoding="utf-8-sig") as f:
         for row in csv.DictReader(f):
-            if not row.get("online", "").strip():
-                continue  # 아직 안 채운 줄
+            if not row.get("online", "").strip() or "AI 초안(검수 전)" in row.get("메모", ""):
+                continue  # 아직 안 채운 줄, 사람이 검수하기 전인 AI 초안은 정답으로 안 씀
             yn = lambda v: v.strip().upper() in ("Y", "TRUE", "1", "O")
             num = lambda v: int(float(v)) if v.strip() else None
             gold[row["servId"]] = {"online": yn(row["online"]), "visit_required": yn(row["visit_required"]),
                                    "n_agencies": num(row["n_agencies"]), "n_conditions": num(row["n_conditions"]),
                                    "n_documents": num(row.get("n_documents", ""))}
     return gold
+
+
+def gold_mix() -> dict:
+    """정답표가 어떻게 만들어졌는지 건수(메모 칸 표시 기준)."""
+    mix = {"사람 검수": 0, "AI 재검토": 0, "사람 작성": 0}
+    for p in sorted(EVAL.glob("gold*.csv")):
+        if p.name == "gold_template.csv":
+            continue
+        with open(p, encoding="utf-8-sig") as f:
+            for row in csv.DictReader(f):
+                memo = row.get("메모", "")
+                if not row.get("online", "").strip() or "AI 초안(검수 전)" in memo:
+                    continue
+                mix["사람 검수" if "사람 검수" in memo else "AI 재검토" if "AI 재검토" in memo else "사람 작성"] += 1
+    return mix
 
 
 def compare(pred: dict, ref: dict) -> dict:

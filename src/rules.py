@@ -65,7 +65,8 @@ def detect_documents(svc: dict) -> list[str] | None:
     parts = re.split(r"\d+\s*[.)]\s*|[,，、/\n]|\s-\s|○|\*", tail)
     docs = []
     for p in parts:
-        p = re.sub(r"\s*\d+\s*부\.?$|\(.*?\)", "", p).strip(" .·:-")
+        p = re.sub(r"\s*\d+\s*부\.?$|\(.*?\)", "", p)
+        p = re.sub(r"^.*서류\s*[:：]\s*", "", p).strip(" .·:-")  # '신청서류 : 신청서' → '신청서'
         if p and len(p) <= 30 and DOC_ITEM.search(p) and not NOT_DOC.search(p) and p not in docs:
             docs.append(p)
     return docs or None

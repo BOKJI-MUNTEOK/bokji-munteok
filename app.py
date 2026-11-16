@@ -59,6 +59,7 @@ def services():
 
 
 SV = services()
+DEMO = st.query_params.get("service", "")  # 시연 링크: ?service=주거약자 이사지원
 if "W" not in st.session_state:
     st.session_state.W = dict(score.DEFAULT_WEIGHTS)
 W = st.session_state.W
@@ -364,6 +365,9 @@ def mine():
         st.markdown("<span class='eyebrow'>복지 신청 길잡이</span>", unsafe_allow_html=True)
         st.title(BRAND)
         st.markdown("<p class='lead'>내 상황을 알려 주면 받을 수 있을 만한 복지만 골라, 쉬운 말로 신청 방법을 알려 드려요.</p>", unsafe_allow_html=True)
+    if demo := next((r for r in ROWS if r["svc"]["servNm"] == DEMO), None):
+        st.markdown("##### 시연 서비스")
+        grid([(demo, None)], "demo", n=2)
     st.markdown("##### 자주 찾는 복지")
     with st.container(key="quick"):
         for col, (name, icon, c) in zip(st.columns(len(QUICK)), QUICK):
@@ -385,7 +389,7 @@ def mine():
 def browse():
     st.header("전체 서비스")
     with st.container(border=True):
-        q = st.text_input("검색", placeholder="서비스 이름, 기관, 지역으로 찾기 (예: 청년, 장애, 해남)", label_visibility="collapsed")
+        q = st.text_input("검색", value=DEMO, placeholder="서비스 이름, 기관, 지역으로 찾기 (예: 청년, 장애, 해남)", label_visibility="collapsed")
         f = st.columns([2, 3, 2, 2], vertical_alignment="center")
         src = f[0].pills("구분", ["중앙", "지자체"], selection_mode="multi", default=["중앙", "지자체"])
         lv = f[1].segmented_control("신청 난이도", ["전체"] + [b[1].replace("신청 ", "") for b in BANDS], default="전체")
@@ -478,12 +482,14 @@ def analysis():
         with a.container(border=True):
             st.markdown("**정답표와 비교 (일치율 %)**")
             if gold:
+                mix = evaluate.gold_mix()
+                st.caption(f"정답표 {len(gold)}건 · AI 초안을 사람이 검수 {mix['사람 검수']}건 · AI가 작성·재검토 {mix['AI 재검토']}건 (기준: eval/README.md)")
                 r_cmp, a_cmp = evaluate.compare(rule_sum, gold), evaluate.compare(ai_sum, gold)
                 st.dataframe(pd.DataFrame({"항목": [evaluate.LABELS[f] for f in evaluate.FIELDS],
                                            "기준표(규칙)": [r_cmp[f] for f in evaluate.FIELDS],
                                            "AI": [a_cmp[f] for f in evaluate.FIELDS]}), hide_index=True, width="stretch")
             else:
-                st.info("정답표(eval/gold.csv)가 아직 없습니다. 검증 담당이 `eval/gold_template.csv`를 채워 `eval/gold.csv`로 저장하면 정확도가 나옵니다.")
+                st.info("아직 채운 정답표가 없습니다. 각자 `eval/gold_이름.csv`를 채워 올리면 여기에 정확도가 나옵니다. 기준은 `eval/README.md`.")
         with b.container(border=True):
             st.markdown("**기준표(규칙)와 AI가 같은 답을 낸 비율** (정답표 전 참고용)")
             if ai_sum:
