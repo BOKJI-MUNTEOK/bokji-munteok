@@ -4,11 +4,11 @@
 
 ## 1. 시작하기
 
-1. 저장소 주인(DavidPark04)이 Settings > Collaborators에서 팀원을 초대합니다. 팀원은 메일로 온 초대를 수락합니다.
+1. 저장소는 [BOKJI-MUNTEOK](https://github.com/BOKJI-MUNTEOK) 조직에 있습니다. 조직 초대 메일을 받으면 수락합니다.
 2. 각자 클론합니다.
 
    ```bash
-   git clone https://github.com/DavidPark04/bokji-munteok.git
+   git clone https://github.com/BOKJI-MUNTEOK/bokji-munteok.git
    cd bokji-munteok
    ```
 
