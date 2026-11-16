@@ -1,7 +1,7 @@
 """정답표 입력 화면. 원문을 읽고 질문에 답하면 eval/gold_<이름>.csv가 채워진다.
 
 실행: .venv/bin/python -m streamlit run eval/label_app.py
-AI 결과는 보여 주지 않는다(정답이 AI 쪽으로 기울지 않게).
+AI 결과는 보여 주지 않는다.
 """
 import csv
 import sys
