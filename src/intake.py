@@ -36,19 +36,19 @@ THEME_WORDS = {
 }
 NONE = r"^(없|아니|해당 ?없|모르|건너)"
 
-# (키, 질문, 빠른 답). 질문의 {name}은 앞에서 받은 호칭.
 ETC = "기타(직접 입력)"
-# (키, 질문, 빠른 답). 질문의 {name}은 앞에서 받은 성함. 빠른 답의 ETC를 고르면 직접 적는다.
+# (키, 질문, 빠른 답). 복지를 거르는 데 바로 쓰는 지역·나이부터 묻는다. 이름은 신청 준비 꾸러미에서 받는다.
+# 빠른 답의 ETC를 고르면 직접 적는다.
 QUESTIONS = [
-    ("name", "안녕하세요, 복지온길이에요. 몇 가지만 여쭤보고 받을 수 있을 만한 복지를 찾아 드릴게요.\n\n"
-             "먼저 **성함**이 어떻게 되세요? (화면에서 부를 때만 쓰고 저장하지 않아요)", []),
-    ("place", "{name}님, **살고 계신 지역**은 어디세요? 시·군·구까지 알려 주시면 동네 복지도 찾아 드려요.", []),
-    ("age", "{name}님 **나이**가 어떻게 되세요?", ["20대", "30대", "40대", "50대", "60대", "70대 이상"]),
+    ("place", "안녕하세요, 복지온길이에요. 몇 가지만 여쭤보고 받을 수 있을 만한 복지를 찾아 드릴게요.\n\n"
+              "먼저 **살고 계신 지역**은 어디세요? 시·군·구까지 알려 주시면 동네 복지도 찾아 드려요.", []),
+    ("age", "**나이**가 어떻게 되세요?", ["20대", "30대", "40대", "50대", "60대", "70대 이상"]),
     ("job", "**직업**은 무엇인가요?", ["학생", "직장인", "구직 중", "자영업", "농어업", "은퇴·무직", ETC]),
     ("family", "**함께 사는 가족**은 어떻게 되세요?",
-     ["혼자 살아요", "배우자", "아이 1~2명", "아이 3명 이상", "부모님(어르신)", "임신 중", ETC]),
-    ("special", "아래 중 **해당되는 것**이 있나요?", ["장애", "저소득(기초·차상위)", "한부모", "보훈", "다문화·탈북", "없음", ETC]),
-    ("need", "마지막이에요. **요즘 가장 도움이 필요한 건** 뭔가요?",
+     ["혼자 살아요", "배우자", "아이 1~2명", "아이 3명 이상", "부모님(어르신)", ETC]),
+    # 임신은 함께 사는 가족이 아니라 본인·배우자의 상황이라 여기서 묻는다
+    ("special", "아래 중 **해당되는 것**이 있나요?", ["임신 중", "장애", "저소득(기초·차상위)", "한부모", "보훈", "다문화·탈북", "없음", ETC]),
+    ("need", "**요즘 가장 도움이 필요한 건** 뭔가요?",
      ["집·월세", "일자리", "병원비·건강", "아이 돌봄", "생활비", "학비", ETC]),
 ]
 
@@ -87,7 +87,7 @@ def take(p: dict, key: str, text: str, places: list[tuple[str, str]]) -> str | N
     text = text.strip()
     p["answers"][key] = text
     if key == "name":
-        p["name"] = text[:10] or "고객"
+        p["name"] = "" if re.search(NONE, text) else text[:10]
     elif key == "place":
         p["sido"], p["sgg"] = find_place(text, places)
         if not p["sido"] and not re.search(NONE, text):
@@ -110,9 +110,9 @@ def take(p: dict, key: str, text: str, places: list[tuple[str, str]]) -> str | N
             _add(p["life"], "영유아", "아동")
         if re.search(r"부모|어르신|할머니|할아버지", text):
             _add(p["life"], "노년")
+    if key in ("family", "special"):
         if re.search(r"임신|출산", text):
             _add(p["life"], "임신·출산")
-    if key in ("family", "special"):
         _add(p["groups"], *[k for k, pat in GROUP_WORDS.items() if not re.search(NONE, text) and re.search(pat, text)])
     if key == "need":
         _add(p["themes"], *[k for k, pat in THEME_WORDS.items() if re.search(pat, text)])
@@ -129,7 +129,7 @@ def typed(text: str, key: str) -> str:
 
 
 def conditions(p: dict) -> dict:
-    return {k: p[k] for k in ("sido", "sgg", "life", "groups", "themes")}
+    return {k: p[k] for k in ("sido", "sgg", "life", "groups", "themes", "age")}
 
 
 def summary(p: dict) -> list[str]:

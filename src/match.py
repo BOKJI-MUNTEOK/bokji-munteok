@@ -1,14 +1,29 @@
-"""내 조건으로 복지 고르기. 공식 목록의 지역·생애주기·대상·주제 태그만 맞춰 본다(자격 판정 아님)."""
+"""내 조건으로 복지 고르기. 공식 목록의 지역·생애주기·대상·주제 태그를 맞추고,
+지원대상 글의 'N세 이상/이하'로 나이가 분명히 안 맞는 것만 뺀다(자격 판정 아님)."""
+import re
 
 LIFE = ["영유아", "아동", "청소년", "청년", "중장년", "노년", "임신·출산"]
 GROUPS = ["저소득", "장애인", "한부모·조손", "다자녀", "다문화·탈북민", "보훈대상자"]
 # 이 태그가 붙은 서비스는 해당하는 사람만 받는다('장애인, 저소득'이면 저소득만으로는 안 됨)
 STRICT = {"장애인", "한부모·조손", "다문화·탈북민", "보훈대상자"}
+# 아이·임신 서비스는 신청하는 사람이 부모라 글에 나온 나이가 신청자 나이가 아니다
+FOR_CHILD = {"영유아", "아동", "청소년", "임신·출산"}
 
 
-def match(svc: dict, sido: str = "", sgg: str = "", life=(), groups=(), themes=()) -> list[str] | None:
+def age_range(text: str) -> tuple[int | None, int | None]:
+    """지원대상 글의 'N세 이상'은 가장 작은 값, 'N세 이하/미만'은 가장 큰 값을 범위로 본다."""
+    lo = [int(n) for n in re.findall(r"(\d{1,3})\s*세\s*이상", text)]
+    hi = [int(n) - (u == "미만") for n, u in re.findall(r"(\d{1,3})\s*세\s*(이하|미만)", text)]
+    return (min(lo) if lo else None), (max(hi) if hi else None)
+
+
+def match(svc: dict, sido: str = "", sgg: str = "", life=(), groups=(), themes=(), age=None) -> list[str] | None:
     """맞으면 맞은 이유(태그) 목록, 안 맞으면 None."""
     why = []
+    if age is not None and not FOR_CHILD & set(svc["life"]):
+        lo, hi = age_range(svc.get("target", ""))
+        if (lo is not None and age < lo) or (hi is not None and age > hi):
+            return None
     if svc["src"] == "지자체":  # 동네 복지는 사는 곳이 같아야 한다
         if not sido or svc["sido"] != sido or (sgg and svc["sgg"] and svc["sgg"] != sgg):
             return None
@@ -30,6 +45,7 @@ def match(svc: dict, sido: str = "", sgg: str = "", life=(), groups=(), themes=(
 
 
 def recommend(rows: list[dict], **cond) -> list[tuple[dict, list[str]]]:
-    """build() 결과에서 맞는 것만, 많이 맞고 신청이 쉬운 순으로."""
+    """build() 결과에서 맞는 것만, 많이 맞고 대상이 좁게 정해졌고 신청이 쉬운 순으로.
+    생애주기 태그가 많거나(청년·중장년·노년) 없는 서비스는 누구에게나 걸리므로 뒤로 보낸다."""
     out = [(r, why) for r in rows if (why := match(r["svc"], **cond)) is not None]
-    return sorted(out, key=lambda x: (-len(x[1]), x[0]["score"]))
+    return sorted(out, key=lambda x: (-len(x[1]), len(x[0]["svc"]["life"]) or len(LIFE) + 1, x[0]["score"]))

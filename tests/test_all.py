@@ -100,6 +100,32 @@ class TestMine(unittest.TestCase):
         svc["groups"] = ["장애인", "저소득"]
         self.assertIsNone(match.match(svc, sido="경기도", groups=["저소득"]))  # 장애인 대상은 저소득만으로 안 됨
 
+    def test_pregnancy_is_a_situation(self):
+        import intake
+        self.assertNotIn("임신 중", next(q for k, _, q in intake.QUESTIONS if k == "family"))  # 가족 구성이 아님
+        p = intake.new_profile()
+        intake.take(p, "special", "임신 중", [])
+        self.assertEqual((p["life"], p["notes"]), (["임신·출산"], []))
+
+    def test_age_in_target_text(self):
+        import match
+        svc = {"src": "중앙", "life": ["청년", "중장년", "노년"], "groups": [], "themes": [],
+               "target": "30세 이상 고혈압 환자. ※ 의료비 지원 대상 : 65세 이상"}
+        self.assertEqual(match.age_range(svc["target"]), (30, None))
+        self.assertIsNone(match.match(svc, life=["청년"], age=22))  # 30세 이상인데 22세
+        self.assertEqual(match.match(svc, life=["청년"], age=35), ["청년"])
+        self.assertEqual(match.age_range("39세 이하 구민, 만 19세 미만 제외"), (None, 39))
+        kid = dict(svc, life=["아동"], target="12세 이하 아동")  # 부모가 신청하는 서비스는 나이로 거르지 않는다
+        self.assertEqual(match.match(kid, life=["아동"], age=40), ["아동"])
+
+    def test_recommend_prefers_narrow_target(self):
+        import match
+        def row(name, life, score):
+            return {"svc": {"src": "중앙", "servNm": name, "life": life, "groups": [], "themes": []}, "score": score}
+        rows = [row("모두", [], 10), row("청년~노년", ["청년", "중장년", "노년"], 20), row("청년만", ["청년"], 30)]
+        names = [r["svc"]["servNm"] for r, _ in match.recommend(rows, life=["청년"])]
+        self.assertEqual(names, ["청년만", "청년~노년", "모두"])  # 문턱이 낮아도 대상이 넓으면 뒤로
+
     def test_intake_steps(self):
         import intake
         places = [("전남광주통합특별시", "해남군")]
@@ -108,7 +134,7 @@ class TestMine(unittest.TestCase):
                           ("family", "아이 3명 이상"), ("special", "없음"), ("need", "집·월세")):
             self.assertIsNone(intake.take(p, key, text, places))
         self.assertEqual(intake.conditions(p), {"sido": "전남광주통합특별시", "sgg": "해남군", "life": ["청년", "영유아", "아동"],
-                                                "groups": ["다자녀"], "themes": ["일자리", "주거"]})
+                                                "groups": ["다자녀"], "themes": ["일자리", "주거"], "age": 32})
         self.assertEqual(intake.find_place("경상북도", [("전남광주통합특별시", "북구"), ("경상북도", "고령군")]), ("경상북도", ""))
         self.assertIsNotNone(intake.take(p, "age", "몰라요", places))  # 나이를 못 알아들으면 다시 묻는다
         intake.take(p, "need", "집·월세, 치매 어머니 간병", places)  # 기타로 직접 적은 말은 요약에 남긴다
@@ -144,8 +170,16 @@ class TestApp(unittest.TestCase):
         from streamlit.testing.v1 import AppTest
         at = AppTest.from_file(str(ROOT / "app.py"), default_timeout=60).run()
         self.assertFalse(at.exception, at.exception)
-        self.assertEqual(at.title[0].value, "복지온길")
+        self.assertTrue(any("질문 몇 개면 알 수 있어요" in m.value for m in at.markdown))  # 홈은 무엇을 하는 곳인지부터
         self.assertEqual(len(at.radio), 0)  # 점수는 기준표로만 계산(AI 선택지 없음)
+
+    def test_broken_state_shows_friendly_error(self):
+        from streamlit.testing.v1 import AppTest
+        at = AppTest.from_file(str(ROOT / "app.py"), default_timeout=60)
+        at.session_state["W"] = "깨짐"  # 계산에 쓸 수 없는 가중치
+        at.run()
+        self.assertTrue(any("불러오지 못했어요" in e.value for e in at.error))  # 빨간 오류 화면 대신 안내 문구
+        self.assertTrue(any(b.key == "fail_reset" for b in at.button))  # 처음으로 돌아갈 버튼
 
     def test_demo_link_shows_service(self):
         from streamlit.testing.v1 import AppTest
