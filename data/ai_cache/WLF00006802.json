@@ -1,0 +1,44 @@
+{
+ "model": "gpt-5.6-luna",
+ "extract": {
+  "online": false,
+  "visit_required": false,
+  "agencies": [
+   "신청"
+  ],
+  "conditions": [
+   {
+    "type": "장애",
+    "text": "장애인"
+   },
+   {
+    "type": "가구 형태",
+    "text": "장애인가족"
+   },
+   {
+    "type": "소득",
+    "text": "수급자 등 저소득 시민"
+   }
+  ],
+  "documents": null
+ },
+ "easy": {
+  "who": "장애인과 장애인 가족, 수급자 등 저소득 시민이 받을 수 있어요.",
+  "conditions": [
+   "대상자가 신청해야 해요."
+  ],
+  "what": "장애인은 컴퓨터 교육을 무료로 받을 수 있어요. 기초Ⅰ·Ⅱ반과 자격증반, 영어 교육을 지원해요.",
+  "steps": [
+   "광명시 시민정보화교육장에 방문해요.",
+   "또는 전화로 신청해요."
+  ]
+ },
+ "check": {
+  "total": 0,
+  "kept": 0,
+  "missing": [],
+  "ok": true
+ },
+ "attempts": 1,
+ "needs_review": false
+}
