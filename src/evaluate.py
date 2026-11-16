@@ -34,8 +34,8 @@ def _read_gold(path: Path) -> dict:
     gold = {}
     with open(path, encoding="utf-8-sig") as f:
         for row in csv.DictReader(f):
-            if not row.get("online", "").strip():
-                continue  # 아직 안 채운 줄
+            if not row.get("online", "").strip() or "AI 초안(검수 전)" in row.get("메모", ""):
+                continue  # 아직 안 채운 줄, 사람이 검수하기 전인 AI 초안은 정답으로 안 씀
             yn = lambda v: v.strip().upper() in ("Y", "TRUE", "1", "O")
             num = lambda v: int(float(v)) if v.strip() else None
             gold[row["servId"]] = {"online": yn(row["online"]), "visit_required": yn(row["visit_required"]),
