@@ -152,7 +152,7 @@ with tab4:
             "AI": [a_cmp[f] for f in evaluate.FIELDS],
         }), hide_index=True)
     else:
-        st.info("정답표(eval/gold.csv)가 아직 없습니다. 검증 담당이 `eval/gold_template.csv`를 채워 `eval/gold.csv`로 저장하면 정확도가 나옵니다.")
+        st.info("아직 채운 정답표가 없습니다. 각자 `eval/gold_이름.csv`를 채워 올리면 여기에 정확도가 나옵니다. 기준은 `eval/README.md`.")
     if ai_sum:
         st.subheader("기준표(규칙)와 AI가 같은 답을 낸 비율 (정답표 전 참고용)")
         cmp = evaluate.compare(rule_sum, ai_sum)
