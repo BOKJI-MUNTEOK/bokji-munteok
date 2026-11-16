@@ -70,12 +70,62 @@ class TestEvaluate(unittest.TestCase):
         self.assertEqual((c["online"], c["visit_required"], c["n_conditions_mae"]), (100.0, 0.0, 2.0))
 
 
+class TestMine(unittest.TestCase):
+    def test_match_tags(self):
+        import match
+        svc = {"src": "지자체", "sido": "경기도", "sgg": "성남시", "region": "경기도 성남시",
+               "life": ["노년"], "groups": ["저소득"], "themes": []}
+        self.assertIsNone(match.match(svc, sido="부산광역시", life=["노년"], groups=["저소득"]))
+        self.assertIsNone(match.match(svc, sido="경기도", life=["노년"]))  # 저소득 대상인데 해당 없음
+        self.assertEqual(match.match(svc, sido="경기도", life=["노년"], groups=["저소득"]), ["경기도 성남시", "노년", "저소득"])
+        svc["groups"] = ["장애인", "저소득"]
+        self.assertIsNone(match.match(svc, sido="경기도", groups=["저소득"]))  # 장애인 대상은 저소득만으로 안 됨
+
+    def test_intake_steps(self):
+        import intake
+        places = [("전남광주통합특별시", "해남군")]
+        p = intake.new_profile()
+        for key, text in (("name", "민수"), ("place", "해남 살아요"), ("age", "32살"), ("job", "구직 중"),
+                          ("family", "아이 3명 이상"), ("special", "없음"), ("need", "집·월세")):
+            self.assertIsNone(intake.take(p, key, text, places))
+        self.assertEqual(intake.conditions(p), {"sido": "전남광주통합특별시", "sgg": "해남군", "life": ["청년", "영유아", "아동"],
+                                                "groups": ["다자녀"], "themes": ["일자리", "주거"]})
+        self.assertEqual(intake.find_place("경상북도", [("전남광주통합특별시", "북구"), ("경상북도", "고령군")]), ("경상북도", ""))
+        self.assertIsNotNone(intake.take(p, "age", "몰라요", places))  # 나이를 못 알아들으면 다시 묻는다
+        intake.take(p, "need", "집·월세, 치매 어머니 간병", places)  # 기타로 직접 적은 말은 요약에 남긴다
+        self.assertIn("직접 적음: 치매 어머니 간병", intake.summary(p))
+
+    def test_paperwork(self):
+        import paperwork
+        row = {"ai": None, "ext": {"documents": None}}
+        self.assertEqual(paperwork.documents(row), (paperwork.BASIC, False))  # 목록 없으면 기본 서류
+        self.assertTrue(paperwork.where("소득금액증명원")[1])  # 홈택스 온라인 발급
+
+
+class TestPacket(unittest.TestCase):
+    def test_zip(self):
+        import io, zipfile
+        import packet
+        from pipeline import build
+        r = next(x for x in build() if len(x["svc"]["form_files"]) >= 2)
+
+        def fetch(url):  # 첫 파일만 받히고 나머지는 실패하는 복지로 흉내
+            if url != r["svc"]["form_files"][0]["url"]:
+                raise TimeoutError
+            return b"hwp"
+        data, failed = packet.build_zip(r, None, {}, fetch=fetch)
+        names = zipfile.ZipFile(io.BytesIO(data)).namelist()
+        self.assertTrue(any(n.endswith(".pdf") for n in names))
+        self.assertEqual(len(failed), len(r["svc"]["form_files"]) - 1)
+        self.assertIn("내려받지_못한_파일.txt", names)
+
+
 class TestApp(unittest.TestCase):
     def test_app_runs(self):
         from streamlit.testing.v1 import AppTest
         at = AppTest.from_file(str(ROOT / "app.py"), default_timeout=60).run()
         self.assertFalse(at.exception, at.exception)
-        self.assertEqual(at.title[0].value, "복지문턱")
+        self.assertEqual(at.title[0].value, "복지온길")
         self.assertEqual(len(at.radio), 0)  # 점수는 기준표로만 계산(AI 선택지 없음)
 
     def test_score_ignores_ai_cache(self):
