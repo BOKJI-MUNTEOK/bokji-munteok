@@ -54,7 +54,7 @@ key = f"idx_{who}"
 if key not in st.session_state:  # 처음 열 때는 아직 안 채운 첫 서비스부터
     st.session_state[key] = first_todo
 idx = st.sidebar.radio("서비스", range(len(rows)), format_func=lambda i: labels[i], key=key)
-st.sidebar.caption("AI 결과는 일부러 보여 주지 않아요. 원문만 보고 답해 주세요. 기준: eval/README.md")
+st.sidebar.caption("원문에 적힌 것만 보고 답해 주세요. 복지로·검색으로 따로 찾지 않아요(원문에 없으면 '아니오'). AI 결과는 일부러 보여 주지 않아요. 기준: eval/README.md")
 
 row = rows[idx]
 s = SV[row["servId"]]
