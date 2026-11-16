@@ -14,6 +14,7 @@ sys.path.insert(0, str(ROOT / "src"))
 from parse import load_all  # noqa: E402
 
 PEOPLE = {"최재용": "gold_jaeyong.csv", "박다윗": "gold_dawit.csv", "김도형": "gold_dohyung.csv"}
+DRAFT, REVIEWED = "AI 초안(검수 전)", "AI 초안·사람 검수"
 COLS = ["servId", "servNm", "online", "visit_required", "n_agencies", "n_conditions", "n_documents",
         "documents(쉼표로)", "메모", "원문"]
 
@@ -42,10 +43,11 @@ SV = services()
 who = st.sidebar.radio("누구 정답표인가요?", list(PEOPLE))
 path = ROOT / "eval" / PEOPLE[who]
 rows = read(path)
-done = [bool(r["online"].strip()) for r in rows]
-st.sidebar.progress(sum(done) / len(rows), text=f"{sum(done)}/{len(rows)}건 완료")
-labels = [f"{'✅' if d else '⬜'} {i + 1}. {r['servNm']}" for i, (r, d) in enumerate(zip(rows, done))]
-first_todo = next((i for i, d in enumerate(done) if not d), 0)
+draft = [DRAFT in r.get("메모", "") for r in rows]
+done = [bool(r["online"].strip()) and not d for r, d in zip(rows, draft)]
+st.sidebar.progress(sum(done) / len(rows), text=f"{sum(done)}/{len(rows)}건 완료" + (f" · 검수 남음 {sum(draft)}건" if any(draft) else ""))
+labels = [f"{'📝' if dr else '✅' if d else '⬜'} {i + 1}. {r['servNm']}" for i, (r, d, dr) in enumerate(zip(rows, done, draft))]
+first_todo = next((i for i, d in enumerate(done) if not d), 0)  # 빈칸이거나 검수 전인 첫 서비스
 if "_goto" in st.session_state:  # 저장 후 다음 서비스로 (위젯 만들기 전에 바꿔야 함)
     st.session_state[f"idx_{who}"] = st.session_state.pop("_goto")
 if "_saved" in st.session_state:
@@ -60,6 +62,8 @@ row = rows[idx]
 s = SV[row["servId"]]
 st.title(f"{idx + 1}. {s['servNm']}")
 st.caption(f"{s['src']} · {s['region']} · {s['org']}")
+if draft[idx]:
+    st.info("📝 AI가 채운 초안입니다. 원문과 비교해 틀린 곳만 고치고 '저장하고 다음으로'를 누르세요. 맞으면 그대로 저장하면 됩니다.")
 
 left, right = st.columns([3, 2])
 with left:
@@ -74,6 +78,8 @@ with left:
 memo = row.get("메모", "")
 prev_cond = memo.split("조건: ", 1)[1].split(" || ", 1)[0].replace(" | ", "\n") if "조건: " in memo else ""
 prev_note = memo.split("메모: ", 1)[1] if "메모: " in memo else ""
+prev_note = prev_note.replace(DRAFT + " / ", "").replace(DRAFT, "").replace(REVIEWED + " / ", "").replace(REVIEWED, "")
+was_ai = DRAFT in memo or REVIEWED in memo
 yn = lambda v, d=None: {"Y": "예", "N": "아니오"}.get(v.strip().upper(), d)
 
 with right:
@@ -113,10 +119,10 @@ with right:
                 "n_conditions": str(len(conds)),
                 "n_documents": str(len(doc_list)) if doc_list else "",
                 "documents(쉼표로)": ", ".join(doc_list),
-                "메모": "조건: " + " | ".join(conds) + (f" || 메모: {note}" if note.strip() else ""),
+                "메모": "조건: " + " | ".join(conds) + (" || 메모: " + " / ".join(x for x in [REVIEWED if was_ai else "", note.strip()] if x) if (was_ai or note.strip()) else ""),
             })
             write(path, rows)
-            nxt = next((i for i in range(idx + 1, len(rows)) if not rows[i]["online"].strip()), None)
+            nxt = next((i for i in range(idx + 1, len(rows)) if not rows[i]["online"].strip() or DRAFT in rows[i].get("메모", "")), None)
             if nxt is not None:
                 st.session_state["_goto"] = nxt
             st.session_state["_saved"] = f"저장했어요: {s['servNm']} (조건 {len(conds)}개, 서류 {len(doc_list) or '정보 없음'})"
