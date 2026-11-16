@@ -111,8 +111,8 @@ AI 예측이 아니라 정해진 항목을 더하는 방식이라, 점수마다 
 
 ## 8. 배포 URL
 
-- Streamlit 배포 주소: 미정 (streamlit.app 배포 후 기재)
-- 배포하지 않으면 이 항목에 "배포 안 함"이라고 적습니다.
+- Streamlit 배포 주소: https://bokji-munteok.streamlit.app
+- `main`에 합치면 자동으로 다시 배포됩니다. 배포 설정은 DavidPark04 계정의 Streamlit Community Cloud에서 관리합니다.
 
 ## 9. 코드와 실행 방법
 
