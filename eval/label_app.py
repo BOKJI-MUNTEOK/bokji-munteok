@@ -40,7 +40,7 @@ def write(path, rows):
 
 
 SV = services()
-who = st.sidebar.radio("누구 정답표인가요?", list(PEOPLE))
+who = st.sidebar.radio("정답표 파일 (처음 나눈 이름)", list(PEOPLE))
 path = ROOT / "eval" / PEOPLE[who]
 rows = read(path)
 draft = [DRAFT in r.get("메모", "") for r in rows]

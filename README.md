@@ -99,14 +99,14 @@ AI 예측이 아니라 정해진 항목을 더하는 방식이라, 점수마다 
 | 이름 | 맡은 일 | GitHub |
 | --- | --- | --- |
 | 박다윗 | 배포(Streamlit Cloud), 저장소·협업 규칙 관리, README 작성, 전체 데이터 수집(예정) | [DavidPark04](https://github.com/DavidPark04) |
-| 최재용 | 데이터 수집(API 샘플 50건), 데이터 전처리, 문턱 점수 지표 설계·계산, AI 쉬운 설명·숫자 검사, Streamlit UI 설계·구현 | [JAEYONGsWorkSpace](https://github.com/JAEYONGsWorkSpace) |
-| 김도형 | 발표자료(PPT), 정답표 검증(예정) | [kdh0381](https://github.com/kdh0381) |
+| 최재용 | 데이터 수집(API 샘플 50건), 데이터 전처리, 문턱 점수 지표 설계·계산, AI 쉬운 설명·숫자 검사, Streamlit UI 설계·구현, 정답표 50건 작성·검수 | [JAEYONGsWorkSpace](https://github.com/JAEYONGsWorkSpace) |
+| 김도형 | 발표자료(PPT) | [kdh0381](https://github.com/kdh0381) |
 
 (예정)은 아직 하지 않은 일입니다. 남은 일은 분석 단계별로 나눕니다.
 
 - 데이터 수집: 중앙·지자체 서비스 전체 받기
 - 지표 설계: 가중치와 조건 세는 기준 확정
-- 검증: 50건 직접 읽고 정답표 작성(`eval/README.md` 기준, 1인 16~17건), 규칙과 AI 정확도 비교
+- 검증: 정답표 50건 검수(최재용, `eval/README.md` 기준), 규칙과 AI 정확도 비교
 - 발표: PPT, 시연 영상
 
 ## 8. 배포 URL
