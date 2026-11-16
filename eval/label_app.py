@@ -78,8 +78,10 @@ with left:
 memo = row.get("메모", "")
 prev_cond = memo.split("조건: ", 1)[1].split(" || ", 1)[0].replace(" | ", "\n") if "조건: " in memo else ""
 prev_note = memo.split("메모: ", 1)[1] if "메모: " in memo else ""
-prev_note = prev_note.replace(DRAFT + " / ", "").replace(DRAFT, "").replace(REVIEWED + " / ", "").replace(REVIEWED, "")
-was_ai = DRAFT in memo or REVIEWED in memo
+AI_ONLY = "AI 초안·AI 재검토"  # 사람이 이 화면에서 저장하면 '사람 검수'로 바뀜
+for tag in (DRAFT, REVIEWED, AI_ONLY):
+    prev_note = prev_note.replace(tag + " / ", "").replace(tag, "")
+was_ai = any(tag in memo for tag in (DRAFT, REVIEWED, AI_ONLY))
 yn = lambda v, d=None: {"Y": "예", "N": "아니오"}.get(v.strip().upper(), d)
 
 with right:
