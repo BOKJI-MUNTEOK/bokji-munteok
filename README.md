@@ -59,7 +59,7 @@
 
 ## 10. 제출 안내
 
-저장소: [DavidPark04/bokji-portfolio](https://github.com/DavidPark04/bokji-portfolio)
+저장소: [DavidPark04/bokji-munteok](https://github.com/DavidPark04/bokji-munteok)
 
 제출기한: **2026년 12월 1일(화) 24:00** (12월 2일 00:00).
 
