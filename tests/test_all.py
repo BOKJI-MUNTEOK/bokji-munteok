@@ -77,14 +77,14 @@ class TestEvaluate(unittest.TestCase):
             d = Path(d)
             head = "servId,servNm,online,visit_required,n_agencies,n_conditions,n_documents\n"
             (d / "gold_a.csv").write_text(head + "1,가,Y,N,2,3,\n2,나,,,,,\n", encoding="utf-8-sig")
-            (d / "gold_b.csv").write_text(head + "3,다,N,Y,1,2,4\n", encoding="utf-8-sig")
+            (d / "gold_b.csv").write_text(head.strip() + ",메모\n3,다,N,Y,1,2,4,\n4,라,Y,N,1,1,,AI 초안(검수 전)\n", encoding="utf-8-sig")
             (d / "gold_template.csv").write_text(head + "9,틀,Y,Y,1,1,1\n", encoding="utf-8-sig")
             old, evaluate.EVAL = evaluate.EVAL, d
             try:
                 g = evaluate.load_gold()
             finally:
                 evaluate.EVAL = old
-        self.assertEqual(sorted(g), ["1", "3"])  # 빈 줄·틀 제외
+        self.assertEqual(sorted(g), ["1", "3"])  # 빈 줄·틀·검수 전 초안 제외
         self.assertEqual(g["1"]["n_documents"], None)
         self.assertEqual(g["3"]["n_documents"], 4)
 
