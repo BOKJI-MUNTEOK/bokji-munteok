@@ -106,7 +106,7 @@ AI 예측이 아니라 정해진 항목을 더하는 방식이라, 점수마다 
 
 - 데이터 수집: 중앙·지자체 서비스 전체 받기
 - 지표 설계: 가중치와 조건 세는 기준 확정
-- 검증: 50~100건 직접 읽고 정답표 작성(`eval/gold_template.csv`), 규칙과 AI 정확도 비교
+- 검증: 50건 직접 읽고 정답표 작성(`eval/README.md` 기준, 1인 16~17건), 규칙과 AI 정확도 비교
 - 발표: PPT, 시연 영상
 
 ## 8. 배포 URL
@@ -137,7 +137,7 @@ AI 결과는 `data/ai_cache/`에 저장돼 있어 API 키가 없어도 화면이
 | `src/score.py` | 문턱 점수(가중합 → 0~100)와 이유 문장 |
 | `src/llm.py`, `prompts/` | AI 조건·서류 뽑기와 쉬운 설명. 숫자가 빠지면 한 번 다시 만들고, 그래도 빠지면 "사람 확인 필요" |
 | `src/numcheck.py` | 원문 숫자(나이·%·금액·기간)가 쉬운 설명에 남았는지 대조 (`200만원` = `2,000,000원`) |
-| `src/evaluate.py`, `eval/` | 정답표와 규칙·AI 결과 비교. `eval/gold_template.csv`를 채워 `eval/gold.csv`로 저장 |
+| `src/evaluate.py`, `eval/` | 정답표와 규칙·AI 결과 비교. 각자 `eval/gold_이름.csv`를 채움(기준: `eval/README.md`) |
 | `tests/` | 단위 테스트 |
 
 ### 명령

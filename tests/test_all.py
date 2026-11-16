@@ -71,6 +71,23 @@ class TestEvaluate(unittest.TestCase):
         c = evaluate.compare(a, b)
         self.assertEqual((c["online"], c["visit_required"], c["n_conditions_mae"]), (100.0, 0.0, 2.0))
 
+    def test_load_gold_merges_person_files(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            head = "servId,servNm,online,visit_required,n_agencies,n_conditions,n_documents\n"
+            (d / "gold_a.csv").write_text(head + "1,가,Y,N,2,3,\n2,나,,,,,\n", encoding="utf-8-sig")
+            (d / "gold_b.csv").write_text(head + "3,다,N,Y,1,2,4\n", encoding="utf-8-sig")
+            (d / "gold_template.csv").write_text(head + "9,틀,Y,Y,1,1,1\n", encoding="utf-8-sig")
+            old, evaluate.EVAL = evaluate.EVAL, d
+            try:
+                g = evaluate.load_gold()
+            finally:
+                evaluate.EVAL = old
+        self.assertEqual(sorted(g), ["1", "3"])  # 빈 줄·틀 제외
+        self.assertEqual(g["1"]["n_documents"], None)
+        self.assertEqual(g["3"]["n_documents"], 4)
+
 
 class TestApp(unittest.TestCase):
     def test_app_runs(self):

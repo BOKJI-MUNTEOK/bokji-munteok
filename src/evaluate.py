@@ -6,7 +6,8 @@ eval/gold.csv 열: servId, online(Y/N), visit_required(Y/N), n_agencies, n_condi
 import csv
 from pathlib import Path
 
-GOLD = Path(__file__).resolve().parent.parent / "eval" / "gold.csv"
+EVAL = Path(__file__).resolve().parent.parent / "eval"
+GOLD = EVAL / "gold.csv"
 FIELDS = ["online", "visit_required", "n_agencies", "n_conditions", "n_documents"]
 LABELS = {"online": "온라인 가능", "visit_required": "방문 필수", "n_agencies": "기관 수",
           "n_conditions": "조건 수", "n_documents": "서류 수"}
@@ -19,9 +20,17 @@ def summarize(ext: dict) -> dict:
             "n_documents": len(docs) if docs else None}
 
 
-def load_gold(path: Path = GOLD) -> dict:
-    if not path.exists():
-        return {}
+def load_gold(path: Path | None = None) -> dict:
+    """path를 주면 그 파일만, 안 주면 eval/gold.csv와 사람별 eval/gold_*.csv(틀 제외)를 합쳐 읽는다."""
+    paths = [path] if path else sorted(p for p in EVAL.glob("gold*.csv") if p.name != "gold_template.csv")
+    gold = {}
+    for p in paths:
+        if p.exists():
+            gold.update(_read_gold(p))
+    return gold
+
+
+def _read_gold(path: Path) -> dict:
     gold = {}
     with open(path, encoding="utf-8-sig") as f:
         for row in csv.DictReader(f):
