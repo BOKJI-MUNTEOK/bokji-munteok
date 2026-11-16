@@ -58,6 +58,8 @@ class TestRules(unittest.TestCase):
         svc = {"src": "지자체", "apply_method_name": "방문", "criteria": "", "target": "",
                "apply": "읍면사무소에 신청.[구비서류]1. 화장장려금 지원 신청서 1부.2. 화장증명서 1부.3. 통장사본 1부."}
         self.assertEqual(rules.detect_documents(svc), ["화장장려금 지원 신청서", "화장증명서", "통장사본"])
+        svc["apply"] = "○ 신청서류 : 신청서, 개인정보동의서, 통장사본"
+        self.assertEqual(rules.detect_documents(svc), ["신청서", "개인정보동의서", "통장사본"])
         self.assertTrue(rules.detect_visit(svc))
         self.assertFalse(rules.detect_online(svc))
 
@@ -77,6 +79,15 @@ class TestApp(unittest.TestCase):
         self.assertFalse(at.exception, at.exception)
         self.assertEqual(at.title[0].value, "복지문턱")
         self.assertEqual(len(at.radio), 0)  # 점수는 기준표로만 계산(AI 선택지 없음)
+
+    def test_demo_link_selects_service(self):
+        from streamlit.testing.v1 import AppTest
+        at = AppTest.from_file(str(ROOT / "app.py"), default_timeout=60)
+        at.query_params["service"] = "주거약자 이사지원"
+        at.run()
+        self.assertFalse(at.exception, at.exception)
+        self.assertEqual([s.value for s in at.selectbox if s.key in ("score_pick", "easy_pick")],
+                         ["주거약자 이사지원", "주거약자 이사지원"])
 
     def test_score_ignores_ai_cache(self):
         from pipeline import build

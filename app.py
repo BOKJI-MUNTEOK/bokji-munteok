@@ -30,6 +30,11 @@ def services():
 
 
 SV = services()
+DEMO = st.query_params.get("service", "")  # 시연 링크: ?service=주거약자 이사지원
+
+
+def pick_index(names):
+    return names.index(DEMO) if DEMO in names else 0
 cached_ai = sum(llm.load_cached(s["servId"]) is not None for s in SV)
 
 with st.sidebar:
@@ -68,7 +73,7 @@ with tab1:
     st.subheader("서비스 하나 자세히 보기")
     names = [r["svc"]["servNm"] for r in rows]
     if names:
-        pick = st.selectbox("서비스", names, key="score_pick")
+        pick = st.selectbox("서비스", names, index=pick_index(names), key="score_pick")
         r = next(x for x in rows if x["svc"]["servNm"] == pick)
         a, b = st.columns([1, 2])
         a.markdown(f"<div class='big'>{r['score']}점</div>{r['reason']}", unsafe_allow_html=True)
@@ -89,8 +94,10 @@ with tab2:
         st.info("아직 AI 쉬운 설명이 없습니다. `python src/pipeline.py --ai`를 실행하면 여기에 카드가 나옵니다.")
     else:
         ok = sum(not r["ai"]["needs_review"] for r in have)
-        st.caption(f"숫자 검사 통과 {ok}/{len(have)}건 · 나머지는 '사람 확인 필요'")
-        pick = st.selectbox("서비스", [r["svc"]["servNm"] for r in have], key="easy_pick")
+        rest = f" · 나머지 {len(have) - ok}건은 '사람 확인 필요'" if ok < len(have) else ""
+        st.caption(f"숫자 검사 통과 {ok}/{len(have)}건{rest}")
+        easy_names = [r["svc"]["servNm"] for r in have]
+        pick = st.selectbox("서비스", easy_names, index=pick_index(easy_names), key="easy_pick")
         r = next(x for x in have if x["svc"]["servNm"] == pick)
         s, ai = r["svc"], r["ai"]
         left, right = st.columns(2)
