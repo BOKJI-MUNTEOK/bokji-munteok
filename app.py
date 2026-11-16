@@ -23,11 +23,10 @@ from pipeline import build
 
 BRAND = "복지문턱"
 LOGO = Path(__file__).resolve().parent / "assets" / "logo"
-st.set_page_config(page_title=BRAND, page_icon="🛤️", layout="wide")
+st.set_page_config(page_title=BRAND, page_icon=str(LOGO / "mark.svg"), layout="wide")
 st.markdown("""
 <style>
-.gov-top{background:#F4F5F6;border-bottom:1px solid #DDE1E6;margin:0 -100vw 14px;padding:7px 100vw;font-size:.85rem;color:#464C53}
-.gov-top b{color:#063A74}
+.site-foot{margin-top:56px;padding:16px 0 4px;border-top:1px solid #E5E8EB;font-size:.8rem;line-height:1.6;color:#8B95A1}
 [data-testid=stMainBlockContainer]{padding-top:2.2rem}
 [data-testid=stMain]{overflow-x:hidden}
 [data-testid=InputInstructions]{display:none}  /* 'Press Enter to apply' 영어 안내: 칸 밖을 누르거나 다음을 눌러도 적용된다 */
@@ -97,10 +96,15 @@ h2,h3{color:#063A74}
 [data-testid=stDialog] [role=dialog]{padding-top:.4rem}
 section[data-testid=stSidebar]{width:232px !important;min-width:232px !important}
 [data-testid=stSidebar]{background:#F4F7FC;border-right:1px solid #DDE1E6}
-[data-testid=stSidebarHeader] img{height:2.6rem !important}
+[data-testid=stSidebarHeader] img{height:1.9rem !important}
+/* 로고 이름: 이미지가 아니라 본문 제목과 같은 글꼴·굵기·색의 글자로. 홈 밖에서는 로고가 홈 버튼(stLogoLink)으로 감싸져도 붙게 */
+[data-testid=stSidebarHeader] :has(>img[data-testid=stSidebarLogo]){display:flex;align-items:center;gap:8px}
+[data-testid=stSidebarHeader] :has(>img[data-testid=stSidebarLogo])::after{content:"복지문턱";font-family:"Pretendard GOV Variable",sans-serif;
+  font-size:1.35rem;font-weight:700;letter-spacing:-.03em;color:#191F28;white-space:nowrap}
 </style>""", unsafe_allow_html=True)
-st.markdown("<div class='gov-top'>공공데이터로 만든 빅데이터실습 학생 프로젝트이며 정부 공식 서비스가 아닙니다</div>",
-            unsafe_allow_html=True)
+# 정부 공식 서비스가 아니라는 안내는 정부24처럼 모든 페이지 맨 아래 바닥글에 둔다.
+# 예전처럼 화면 위 띠로 두면 배포 환경의 상단 바에 반쯤 가려진다.
+GOV_NOTICE = "공공데이터로 만든 빅데이터실습 학생 프로젝트이며, 정부 공식 서비스가 아닙니다."
 
 # 문턱 구간: (분석용 이름, 시민용 이름, 하한, 상한, 배지 색, 차트 색)
 BANDS = [("낮음", "신청 쉬움", 0, 40, "green", "#2F8F5B"), ("보통", "신청 보통", 40, 60, "orange", "#D9822B"),
@@ -707,10 +711,12 @@ ALL = st.Page(browse, title="전체 서비스", icon=":material/list:", url_path
 nav = st.navigation({"시민용": [st.Page(home, title="홈", icon=":material/home:", default=True), FIND, ALL],
                       "팀·평가용": [st.Page(analysis, title="데이터 분석", icon=":material/analytics:", url_path="analysis"),
                              st.Page(guide, title="안내", icon=":material/info:", url_path="guide")]}, position="sidebar")
-st.logo(str(LOGO / "lockup.svg"), size="large", icon_image=str(LOGO / "mark.svg"))
+st.logo(str(LOGO / "mark.svg"), size="large", icon_image=str(LOGO / "mark.svg"))  # 이름은 아래 CSS로 본문과 같은 글꼴로 붙인다
 with st.sidebar:
     st.caption(f"샘플 {len(SV)}건 · 중앙 25 · 지자체 25\n\n입력한 내용은 저장하지 않아요.")
 try:
     nav.run()
+    st.markdown(f"<div class='site-foot'>{GOV_NOTICE}<br>자료: 한국사회보장정보원 복지서비스 API(공공데이터포털)</div>",
+                unsafe_allow_html=True)
 except Exception as e:  # 화면을 그리다 난 예외는 친절한 안내로 바꾼다(st.rerun·switch_page는 BaseException이라 통과)
     fail("화면을 보여 드리다 문제가 생겼어요. 아래 버튼을 눌러 처음부터 다시 시작해 주세요.", e)
