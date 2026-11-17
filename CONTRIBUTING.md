@@ -74,8 +74,7 @@ GitHub에서 PR을 열고 본인이 직접 합칩니다(Squash and merge). 검�
 
 | 폴더 | 넣는 것 |
 | --- | --- |
-| `main.py`, `web/` | Vercel 웹 앱과 브라우저 화면 |
-| `app.py` | 기존 Streamlit 화면 (비교·로컬 실행용) |
+| `app.py` | Streamlit 실행 파일 |
 | `src/` | 데이터 받기, 점수 계산, 숫자 검사 같은 파이썬 코드 |
 | `prompts/` | 언어 모델 프롬프트 |
 | `data/raw/` | API에서 받은 원본 (올리지 않음) |
