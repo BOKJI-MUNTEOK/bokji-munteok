@@ -36,6 +36,8 @@ GitHub Actions 워크플로로 `main` 변경을 자동 배포합니다.
 - `main` push·PR 병합 시 운영 배포합니다. PR 브랜치 push와 PR 생성은 배포하지 않습니다.
 - Python 3.12에서 기존 단위 테스트를 실행하고, 실패하면 배포하지 않습니다.
 - Vercel CLI 65.16.0으로 원본 소스를 업로드하고, Vercel이 기존 Dockerfile로 빌드합니다.
+- CI는 `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID`, `VERCEL_TOKEN` 환경변수로 배포 대상을 지정합니다.
+  프로젝트 범위 토큰에서 계정 조회 오류가 발생하는 `--scope` 옵션은 사용하지 않습니다.
 - 현재 프로젝트 `bokji-munteok`과 운영 주소를 계속 사용합니다.
 - 배포를 순서대로 처리해 이전 커밋이 최신 배포를 뒤늦게 덮어쓰지 않게 합니다.
 - 수동 재실행은 Actions의 `Run workflow`에서 `main`을 선택합니다.
