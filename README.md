@@ -2,8 +2,8 @@
 
 빅데이터실습[YC] 기말 데이터분석 프로젝트 저장소입니다.
 
-> **진행 상태: 시연 앱 1차본 (11/16)**
-> 샘플 50건으로 문턱 점수(기준표)와 AI 신청 보조 화면을 만들었습니다. 가중치, 팀원 역할, 정답표 검증은 아직 확정하지 않았습니다.
+> **진행 상태: Vercel 웹 앱 이전 (11/17)**
+> 샘플 50건의 문턱 점수·복지 찾기·AI 쉬운 설명·신청 준비 꾸러미를 Vercel에서 실행합니다. 가중치는 팀 결정 전 안입니다.
 
 ## 목차
 
@@ -20,11 +20,11 @@
 
 ## 1. 프로젝트 설명
 
-복지서비스 안내문을 분석해 서비스마다 신청이 얼마나 번거로운지 **문턱 점수**로 보여주고, 어려운 안내문을 **쉬운 설명 카드**로 바꿔 주는 Streamlit 앱입니다.
+복지서비스 안내문을 분석해 서비스마다 신청이 얼마나 번거로운지 **문턱 점수**로 보여주고, 어려운 안내문을 **쉬운 설명 카드**로 바꿔 주는 웹 앱입니다. Vercel용 FastAPI 화면과 기존 Streamlit 화면이 같은 Python 분석 코드를 사용합니다.
 
 - **문턱 점수**: 온라인 신청 가능 여부, 방문 필요 여부, 거치는 기관 수, 조건 수, 서류 수, 안내문 난이도를 더해 0~100점으로 나타냅니다. "방문만 가능, 조건 5개, 기관 3단계라서 78점"처럼 이유를 함께 보여줍니다.
 - **쉬운 설명**: 누가 받을 수 있나 / 조건은 무엇인가 / 무엇을 받나 / 할 일은 순서대로 무엇인가, 이 네 칸으로 정리합니다.
-- **신청 준비**(설계만): 공통서식 신청서와 위임장 빈칸을 채워 인쇄합니다.
+- **신청 준비**: 신청서·위임장 작성 도우미 PDF와 기관 첨부 양식을 ZIP으로 받습니다. 공식 접수는 담당 기관에서 합니다.
 
 ## 2. 주제
 
@@ -111,8 +111,10 @@ AI 예측이 아니라 정해진 항목을 더하는 방식이라, 점수마다 
 
 ## 8. 배포 URL
 
-- Streamlit 배포 주소: https://bokji-munteok.streamlit.app
-- `main`에 합치면 자동으로 다시 배포됩니다. 배포 설정은 DavidPark04 계정의 Streamlit Community Cloud에서 관리합니다.
+- **Vercel 배포 주소: https://bokji-munteok.vercel.app/find**
+- Vercel 배포 설정: [docs/vercel-deployment.md](docs/vercel-deployment.md)
+- 기존 Streamlit 주소: https://bokji-munteok.streamlit.app (이전 화면)
+- 현재는 Vercel CLI로 배포합니다. 조직 소유자가 GitHub 앱 설치를 승인하고 이 저장소의 `main`을 연결하면 PR은 Preview, main 병합은 Production으로 자동 배포됩니다.
 
 ## 9. 코드와 실행 방법
 
@@ -121,16 +123,21 @@ AI 예측이 아니라 정해진 항목을 더하는 방식이라, 점수마다 
 ```bash
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
-.venv/bin/python -m streamlit run app.py
+.venv/bin/python -m uvicorn main:app --reload
 ```
 
 AI 결과는 `data/ai_cache/`에 저장돼 있어 API 키가 없어도 화면이 열립니다.
+
+브라우저에서 http://127.0.0.1:8000/find 를 엽니다. Windows에서는 `.venv/bin/` 대신 `.venv\\Scripts\\`를 사용합니다.
+기존 화면 비교는 `python -m streamlit run app.py`로 실행합니다. 자세한 이전·배포 설정은 [Vercel 안내](docs/vercel-deployment.md)를 참고하세요.
 
 ### 폴더
 
 | 파일 | 하는 일 |
 | --- | --- |
-| `app.py` | 화면: ① 문턱 점수(기준표) ② 신청 보조(AI) ③ 신청서 채우기(설계) ④ 검증 ⑤ 계산 기준 |
+| `main.py`, `web/` | Vercel 웹 앱: 홈, 내 복지 찾기, 전체 서비스, 데이터 분석, 안내 |
+| `app.py` | 기존 Streamlit 화면 (비교·로컬 실행용) |
+| `pyproject.toml`, `vercel.json` | Vercel Python 런타임·진입점·실행 제한 |
 | `src/collect_sample.py` | 복지서비스 API에서 상세 XML 받기 → `data/raw/` (`.env`의 `DATA_GO_KR_KEY`) |
 | `src/parse.py` | 중앙·지자체 XML을 같은 모양으로 정리. `data/raw/`가 없으면 `data/sample/` 50건 사용 |
 | `src/rules.py` | 점수에 넣을 값 뽑기(온라인·방문·기관·조건·서류). AI와 비교하는 기준선이기도 함 |

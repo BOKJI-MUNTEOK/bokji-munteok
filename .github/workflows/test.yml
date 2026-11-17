@@ -1,0 +1,21 @@
+name: Python checks
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install application and test dependencies
+        run: pip install -r requirements.txt fastapi==0.163.1 uvicorn httpx
+      - name: Test existing logic and Vercel endpoints
+        run: python -m unittest discover -s tests -v
+      - name: Check browser JavaScript
+        run: node --check web/app.js
