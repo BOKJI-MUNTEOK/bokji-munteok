@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="지역과 나이, 가족 상황으로 복지를 찾고 신청에 필요한 서류를 준비해요.">
+  <title>복지문턱</title>
+  <link rel="icon" href="/assets/logo/mark.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="/static/app.js" defer></script>
+</head>
+<body>
+  <a class="skip" href="#main">본문으로 이동</a>
+  <aside class="sidebar">
+    <a class="brand" href="/" data-nav><img src="/assets/logo/mark.svg" alt="">복지문턱</a>
+    <nav aria-label="주 메뉴">
+      <small>시민용</small>
+      <a href="/" data-nav>홈</a>
+      <a href="/find" data-nav>내 복지 찾기</a>
+      <a href="/all" data-nav>전체 서비스</a>
+      <small>팀·평가용</small>
+      <a href="/analysis" data-nav>데이터 분석</a>
+      <a href="/guide" data-nav>안내</a>
+    </nav>
+    <p class="side-note">입력한 내용은 서버에 저장하지 않아요.<br>새로고침하면 입력이 초기화돼요.</p>
+  </aside>
+  <div class="page">
+    <main id="main" tabindex="-1"><p role="status" class="loading">복지 정보를 불러오고 있어요…</p></main>
+    <footer>공공데이터로 만든 빅데이터실습 학생 프로젝트이며, 정부 공식 서비스가 아닙니다.<br>자료: 한국사회보장정보원 복지서비스 API(공공데이터포털)</footer>
+  </div>
+  <dialog id="detail" aria-labelledby="detail-title"></dialog>
+  <noscript>이 화면을 사용하려면 브라우저에서 JavaScript를 허용해 주세요.</noscript>
+</body>
+</html>
