@@ -112,13 +112,8 @@ AI 예측이 아니라 정해진 항목을 더하는 방식이라, 점수마다 
 
 ## 8. 배포 URL
 
-- **현재 운영 주소**: [복지문턱](https://bokji-munteok.vercel.app/)
-- **내 복지 찾기**: [바로 시작하기](https://bokji-munteok.vercel.app/find)
-- 기존 Streamlit Cloud 주소: https://bokji-munteok.streamlit.app
-
-현재 운영 환경은 `kdh0381/bokji-munteok` Vercel 프로젝트의 **Container Runtime**입니다. 기존 Streamlit 앱을 그대로 실행하며, 배포에 필요한 설정만 추가했습니다.
-
-Vercel의 GitHub 자동 배포는 연결되어 있지 않습니다. `main` 병합 후 아래 CLI 명령으로 운영 배포합니다. 설정과 운영 제약은 [Vercel 배포 안내](docs/vercel-deployment.md)를 참고하세요.
+- Vercel 배포 주소: https://bokji-munteok.vercel.app
+- `main`에 합친 뒤 Vercel CLI로 배포합니다. 배포 설정은 kdh0381 계정의 Vercel에서 관리합니다.
 
 ## 9. 코드와 실행 방법
 
