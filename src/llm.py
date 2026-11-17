@@ -93,12 +93,12 @@ def run(svc: dict, force: bool = False) -> dict:
     CACHE.mkdir(parents=True, exist_ok=True)
     path = CACHE / f"{svc['servId']}.json"
     if path.exists() and not force:
-        return json.loads(path.read_text())
+        return json.loads(path.read_text(encoding="utf-8"))
     out = {"model": MODEL, "extract": extract(svc), **make_easy(svc)}
-    path.write_text(json.dumps(out, ensure_ascii=False, indent=1))
+    path.write_text(json.dumps(out, ensure_ascii=False, indent=1), encoding="utf-8")
     return out
 
 
 def load_cached(serv_id: str) -> dict | None:
     p = CACHE / f"{serv_id}.json"
-    return json.loads(p.read_text()) if p.exists() else None
+    return json.loads(p.read_text(encoding="utf-8")) if p.exists() else None
