@@ -87,6 +87,17 @@ class TestLiveCatalogApp(unittest.TestCase):
         self.assertFalse(at.exception, at.exception)
         self.assertTrue(any("자동 수집" in i.value for i in at.info))
 
+    def test_new_records_during_first_render_do_not_cause_rerun_loop(self):
+        from streamlit.testing.v1 import AppTest
+        state = {"revision": 1, "running": True, "sources": {
+            name: {"ready": 0, "total": 73 if name == "central" else 0, "status": "collecting"}
+            for name in ("central", "local")}}
+        self.api.catalog.return_value["sync"] = state
+        self.api.refresh_status.return_value = {**state, "revision": 2}
+        at = AppTest.from_file(str(ROOT / "app.py"), default_timeout=30).run()
+        self.assertFalse(at.exception, at.exception)
+        self.api.refresh_status.assert_called_once()
+
     def test_pending_catalog_home_has_actual_count_without_detail_calls(self):
         from streamlit.testing.v1 import AppTest
         at = AppTest.from_file(str(ROOT / "app.py"), default_timeout=30).run()

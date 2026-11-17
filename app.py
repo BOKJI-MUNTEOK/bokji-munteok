@@ -1,6 +1,7 @@
 """복지문턱 시연 화면. 실행: .venv/bin/python -m streamlit run app.py"""
 import re
 import sys
+import time
 from datetime import datetime, timedelta, timezone
 from html import escape
 from pathlib import Path
@@ -170,6 +171,9 @@ except Exception as e:
     st.stop()
 
 
+CATALOG_DISPLAYED_AT = time.monotonic()
+
+
 @st.fragment(run_every="30s")
 def sync_status():
     try:
@@ -183,7 +187,8 @@ def sync_status():
         row = state["sources"][source]
         st.caption(f"{name} 분석 저장 {row['ready']:,}/{row['total']:,}건 · {labels.get(row['status'], '수집 대기')}")
     st.caption("한국시간 기준 첫 접속 때 자동 갱신하며, 수집 중에도 저장된 자료를 볼 수 있어요.")
-    if state["revision"] != CATALOG["sync"]["revision"]:
+    # 첫 화면을 그리는 동안 수집이 진행되어도 연속 rerun하지 않고 다음 폴링에서 반영한다.
+    if state["revision"] != CATALOG["sync"]["revision"] and time.monotonic() - CATALOG_DISPLAYED_AT >= 15:
         services.clear()
         st.rerun()
 
