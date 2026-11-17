@@ -4,6 +4,10 @@
 `app.py`, `src/`, `.streamlit/config.toml`, 데이터, 의존성을 변경하지 않고 그대로 실행합니다.
 별도 FastAPI 앱이나 HTML/JavaScript 화면으로 재작성하지 않습니다.
 
+운영 주소: [복지문턱](https://bokji-munteok.vercel.app/) · [내 복지 찾기](https://bokji-munteok.vercel.app/find)
+
+`kdh0381/bokji-munteok` 프로젝트에 CLI로 운영 배포했습니다. GitHub 자동 배포는 연결되어 있지 않으므로 main 병합 후 운영 배포 명령을 실행합니다.
+
 ## 배포 구성
 
 - Vercel Framework Preset: **Container**
@@ -32,8 +36,15 @@ vercel deploy --prod --scope kdh0381
 
 ## 확인 범위와 운영 제약
 
-이 PR은 사용자가 직접 화면을 확인하도록 요청한 작업입니다. 브라우저 화면 비교는 하지 않습니다.
-기존 코드와의 Git 비교, 기존 테스트, 컨테이너 빌드 결과를 기록합니다.
+2026-11-17 운영 배포에서 다음을 확인했습니다.
+
+- 원본 커밋과 앱 코드·테마·데이터·의존성의 Git diff 없음
+- 기존 테스트 21개 통과
+- Vercel 컨테이너 빌드 및 운영 배포 성공
+- 공개 주소의 `/_stcore/health` 응답 `ok`, 5개 페이지 HTTP 200
+- WebSocket으로 원본 Streamlit 스크립트 실행 완료
+
+브라우저 화면 비교는 하지 않았으며, 사용자가 직접 확인합니다.
 
 Vercel의 WebSocket 연결은 Function 최대 실행 시간이 지나면 종료됩니다.
 재연결이 다른 인스턴스로 갈 수 있으므로 장시간 사용 중 입력 세션이 초기화될 수 있습니다.
