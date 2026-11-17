@@ -1,19 +1,4 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "framework": "fastapi",
-  "functions": {
-    "main.py": {
-      "maxDuration": 60,
-      "excludeFiles": "{.venv/**,.git/**,tests/**,docs/**,app.py,.streamlit/**}"
-    }
-  },
-  "headers": [
-    {
-      "source": "/(.*)",
-      "headers": [
-        {"key": "X-Content-Type-Options", "value": "nosniff"},
-        {"key": "Referrer-Policy", "value": "strict-origin-when-cross-origin"}
-      ]
-    }
-  ]
+  "framework": "container"
 }
