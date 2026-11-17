@@ -1,6 +1,5 @@
 """공식 복지 API 요청과 DB 기반 화면 데이터. 키·요청 URL은 출력하지 않는다."""
 import os
-import logging
 import re
 import threading
 import time
@@ -68,7 +67,7 @@ class DataClient:
                 self.store.renew(self.owner)
             reserved = self.store.reserve_key(source, self.keys)
             if reserved is None:
-                raise QuotaExceeded(f"{label}의 오늘 사용 가능한 호출량을 모두 사용했습니다. 다음날 접속하면 이어서 수집합니다.")
+                raise QuotaExceeded(f"{label}의 오늘 사용 가능한 호출량을 모두 사용했습니다. 다음날 예약 갱신에서 이어서 수집합니다.")
             key, day = reserved
             query = urllib.parse.urlencode({"serviceKey": key, **params})
             url = f"https://apis.data.go.kr/B554287/{base}/{detailed if detail else listing}?{query}"
@@ -140,49 +139,19 @@ class DataClient:
 
 
 class WelfareAPI:
-    """Streamlit/명령줄 공통 진입점. 첫 접속의 갱신과 화면 읽기를 분리한다."""
-    def __init__(self, database_url=None, keys=None):
+    """화면과 명령줄에서 저장 자료만 읽는다. API 수집은 예약 작업이 맡는다."""
+    def __init__(self, database_url=None):
         load_env()
         self.database_url = database_url or os.environ.get("MONGODB_URI", "")
-        self.keys = api_keys() if keys is None else list(dict.fromkeys(keys))
-        self.thread = None
-        self.thread_lock = threading.Lock()
         self.snapshot_lock = threading.Lock()
         self.snapshot_cache = None
-        with WelfareStore(self.database_url) as store:
-            store.initialize()
-
-    def start_refresh(self):
-        from welfare_sync import sync
-        with self.thread_lock:
-            if self.thread and self.thread.is_alive():
-                return
-            with WelfareStore(self.database_url) as store:
-                if not store.needs_sync(self.keys):
-                    return
-
-            def run():
-                try:
-                    sync(self.database_url, self.keys, max_seconds=210)
-                except Exception as exc:
-                    # 예외 본문에는 접속 정보가 포함될 수 있으므로 종류만 기록한다.
-                    logging.getLogger(__name__).warning("복지 자동 갱신 중단: %s", type(exc).__name__)
-
-            self.thread = threading.Thread(target=run, daemon=True, name="welfare-sync")
-            self.thread.start()
 
     def catalog(self):
-        self.start_refresh()
         with self.snapshot_lock, WelfareStore(self.database_url) as store:
             revision = store.revision()
             if self.snapshot_cache is None or self.snapshot_cache["sync"]["revision"] != revision:
-                self.snapshot_cache = store.snapshot(self.keys)
+                self.snapshot_cache = store.snapshot()
             return self.snapshot_cache
-
-    def refresh_status(self):
-        self.start_refresh()
-        with WelfareStore(self.database_url) as store:
-            return store.progress(self.keys)
 
     def services(self, catalog):
         return catalog["services"]
@@ -193,6 +162,5 @@ class WelfareAPI:
         if service is None:
             raise APIError("공식 목록에서 삭제된 서비스입니다.")
         if not service.get("detail_loaded"):
-            self.start_refresh()
-            raise APIError("이 서비스의 상세는 자동 수집 대기 중입니다. 저장이 끝나면 신청 안내와 점수가 표시됩니다.")
+            raise APIError("이 서비스의 상세는 자동 수집 대기 중입니다. 매일 00·06·12·18시(한국시간) 예약 갱신에서 수집하며 저장 후 신청 안내와 점수가 표시됩니다.")
         return service

@@ -63,7 +63,7 @@ class TestLiveCatalogApp(unittest.TestCase):
                                          "updated_at": time.time(), "warnings": []}
         self.api.services.return_value = self.items
 
-    def test_daily_sync_status_is_displayed_and_polled(self):
+    def test_saved_counts_and_schedule_display_without_polling(self):
         from streamlit.testing.v1 import AppTest
         state = {"revision": 1, "running": True, "sources": {
             "central": {"ready": 10, "total": 73, "status": "collecting"},
@@ -73,7 +73,9 @@ class TestLiveCatalogApp(unittest.TestCase):
         at = AppTest.from_file(str(ROOT / "app.py"), default_timeout=30).run()
         self.assertFalse(at.exception, at.exception)
         self.assertTrue(any("10/73건" in c.value for c in at.caption))
-        self.api.refresh_status.assert_called_once()
+        self.assertTrue(any("00·06·12·18시" in c.value for c in at.caption))
+        self.api.refresh_status.assert_not_called()
+        self.api.start_refresh.assert_not_called()
 
     def test_first_collection_shows_pending_state_without_sample_data(self):
         from streamlit.testing.v1 import AppTest
@@ -87,7 +89,7 @@ class TestLiveCatalogApp(unittest.TestCase):
         self.assertFalse(at.exception, at.exception)
         self.assertTrue(any("자동 수집" in i.value for i in at.info))
 
-    def test_new_records_during_first_render_do_not_cause_rerun_loop(self):
+    def test_repeated_page_render_uses_cached_catalog_without_status_query(self):
         from streamlit.testing.v1 import AppTest
         state = {"revision": 1, "running": True, "sources": {
             name: {"ready": 0, "total": 73 if name == "central" else 0, "status": "collecting"}
@@ -95,8 +97,10 @@ class TestLiveCatalogApp(unittest.TestCase):
         self.api.catalog.return_value["sync"] = state
         self.api.refresh_status.return_value = {**state, "revision": 2}
         at = AppTest.from_file(str(ROOT / "app.py"), default_timeout=30).run()
+        at.run()
         self.assertFalse(at.exception, at.exception)
-        self.api.refresh_status.assert_called_once()
+        self.api.catalog.assert_called_once()
+        self.api.refresh_status.assert_not_called()
 
     def test_pending_catalog_home_has_actual_count_without_detail_calls(self):
         from streamlit.testing.v1 import AppTest

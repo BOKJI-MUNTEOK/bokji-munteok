@@ -18,6 +18,12 @@ def today(now=None):
     return datetime.fromtimestamp(time.time() if now is None else now, KST).date().isoformat()
 
 
+def sync_slot(now=None):
+    """한국시간 00·06·12·18시 구간. 같은 구간의 재실행은 목록을 재호출하지 않는다."""
+    dt = datetime.fromtimestamp(time.time() if now is None else now, KST)
+    return f"{dt.date().isoformat()}T{dt.hour // 6 * 6:02d}"
+
+
 def key_id(key):
     return hashlib.sha256(key.encode()).hexdigest()[:24]
 
@@ -39,7 +45,7 @@ def mongo_client(uri):
 
 
 def initial_source():
-    return dict(generation="", previous_generation="", catalog_day="", catalog_at=0,
+    return dict(generation="", previous_generation="", catalog_day="", catalog_slot="", catalog_at=0,
                 run_day="", status="pending", retry_at=0, note="", added=0, changed=0, removed=0)
 
 
@@ -107,7 +113,7 @@ class WelfareStore:
                 {"source": source, "generation": generation}, {"item": 1}).sort("serv_id", 1)]
         return self.catalog_cache[generation]
 
-    def publish_catalog(self, source, items, owner):
+    def publish_catalog(self, source, items, owner, slot=None):
         """전체 목록 저장 후 공개 포인터를 원자적으로 교체한다.
 
         페이지 실패/저장 중단 때 기존 목록을 유지하고, 완성된 목록에서 빠진 항목만
@@ -128,6 +134,7 @@ class WelfareStore:
                  "generation": generation, "detail_ref": detail_id(s), "created_at": now, "item": s}
                 for s in items[offset:offset + 500]])
         values = dict(generation=generation, previous_generation=state["generation"], catalog_day=today(),
+                      catalog_slot=slot or sync_slot(),
                       catalog_at=now, run_day=today(), status="collecting", note="", retry_at=0, **changes)
         result = self.db.meta.update_one(
             {"_id": "sync", "owner": owner, "expires": {"$gt": time.time()}},
@@ -203,7 +210,7 @@ class WelfareStore:
         meta = self.db.meta.find_one({"_id": "sync"})
         result = {"revision": meta["revision"], "running": meta["expires"] > time.time(), "sources": {}}
         for source, state in meta["sources"].items():
-            # 30초 폴링에서 수천 건의 원문을 내려받지 않고 DB에서 건수만 집계한다.
+            # 예약 작업의 로그에서만 사용한다. 웹 화면에서는 읽은 자료로 건수를 계산한다.
             counts = list(self.db.catalog.aggregate([
                 {"$match": {"source": source, "generation": state["generation"]}},
                 {"$lookup": {"from": self.db.details.name, "localField": "detail_ref",
@@ -217,16 +224,10 @@ class WelfareStore:
         return result
 
     def revision(self):
-        return self.db.meta.find_one({"_id": "sync"}, {"revision": 1})["revision"]
-
-    def needs_sync(self, keys):
-        for source in LIMITS:
-            state = self.source_state(source)
-            if state["retry_at"] > time.time() or not self.remaining(source, keys):
-                continue
-            if state["catalog_day"] != today() or self.pending(source, 1):
-                return True
-        return False
+        meta = self.db.meta.find_one({"_id": "sync"}, {"revision": 1})
+        if meta is None:
+            raise StoreError("저장된 복지 데이터가 아직 없어요. 첫 예약 갱신이 완료된 뒤 다시 확인해 주세요.")
+        return meta["revision"]
 
     @staticmethod
     def _service(item, detail):
@@ -243,18 +244,19 @@ class WelfareStore:
         row = self.db.catalog.find_one({"source": source, "generation": state["generation"], "serv_id": sid})
         return self._service(row["item"], self.db.details.find_one({"_id": detail_id(row["item"])})) if row else None
 
-    def snapshot(self, keys=()):
+    def snapshot(self):
         meta = self.db.meta.find_one({"_id": "sync"})
         services, counts = [], {}
+        progress = {"revision": meta["revision"], "sources": {}}
         for source, state in meta["sources"].items():
             items = self._catalog(source, state)
             refs = [detail_id(s) for s in items]
             details = {d["_id"]: d for d in self.db.details.find({"_id": {"$in": refs}})}
             services.extend(self._service(s, details.get(detail_id(s))) for s in items)
             counts[source] = len(items)
-        # 복사 중 저장된 상세도 다음 폴링에서 갱신되도록 읽기 시작 시의 revision을 쓴다.
-        progress = self.progress(keys)
-        progress["revision"] = meta["revision"]
+            progress["sources"][source] = {**state, "total": len(items),
+                                           "ready": sum(detail_id(s) in details for s in items)}
+        # 읽은 자료로 집계해 별도의 전체 조인·호출 한도 조회를 하지 않는다.
         states = meta["sources"].values()
         return {"services": services, "counts": counts,
                 "updated_at": min((s["catalog_at"] for s in states), default=0), "sync": progress,

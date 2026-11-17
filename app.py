@@ -1,7 +1,6 @@
 """복지문턱 시연 화면. 실행: .venv/bin/python -m streamlit run app.py"""
 import re
 import sys
-import time
 from datetime import datetime, timedelta, timezone
 from html import escape
 from pathlib import Path
@@ -126,7 +125,7 @@ def welfare_client():
     return WelfareAPI()
 
 
-@st.cache_data(ttl=60, show_spinner="공식 복지서비스 목록을 불러오고 있어요")
+@st.cache_data(ttl=300, show_spinner="공식 복지서비스 목록을 불러오고 있어요")
 def services():
     return welfare_client().catalog()
 
@@ -171,33 +170,18 @@ except Exception as e:
     st.stop()
 
 
-CATALOG_DISPLAYED_AT = time.monotonic()
-
-
-@st.fragment(run_every="30s")
-def sync_status():
-    try:
-        state = welfare_client().refresh_status()
-    except (APIError, StoreError) as exc:
-        st.warning(str(exc))
-        return
-    labels = {"pending": "수집 대기", "listing": "목록 갱신 중", "collecting": "상세 수집 중",
-              "complete": "갱신 완료", "quota": "오늘 한도 도달", "error": "재시도 대기", "waiting": "재시도 대기"}
+def sync_status(state):
     for source, name in (("central", "중앙부처"), ("local", "지자체")):
         row = state["sources"][source]
-        st.caption(f"{name} 분석 저장 {row['ready']:,}/{row['total']:,}건 · {labels.get(row['status'], '수집 대기')}")
-    st.caption("한국시간 기준 첫 접속 때 자동 갱신하며, 수집 중에도 저장된 자료를 볼 수 있어요.")
-    # 첫 화면을 그리는 동안 수집이 진행되어도 연속 rerun하지 않고 다음 폴링에서 반영한다.
-    if state["revision"] != CATALOG["sync"]["revision"] and time.monotonic() - CATALOG_DISPLAYED_AT >= 15:
-        services.clear()
-        st.rerun()
+        st.caption(f"{name} 분석 저장 {row['ready']:,}/{row['total']:,}건")
+    st.caption("매일 00·06·12·18시(한국시간)에 자동 갱신합니다. 저장된 자료를 표시하고 있어요.")
 
 
 if CATALOG.get("sync"):
     with st.sidebar:
-        sync_status()
+        sync_status(CATALOG["sync"])
 if not SV:
-    st.info("공식 복지서비스를 자동 수집하고 있어요. 저장이 완료되면 이 화면에 표시됩니다.")
+    st.info("공식 복지서비스는 매일 00·06·12·18시(한국시간)에 자동 수집합니다. 첫 저장 완료 후 새로고침해 주세요.")
     st.stop()
 for warning in CATALOG["warnings"]:
     st.warning(warning)
