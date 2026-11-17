@@ -14,7 +14,7 @@ from parse import clean, load_all
 
 class TestParse(unittest.TestCase):
     def test_load_50(self):
-        rows = load_all()
+        rows = load_all(ROOT / "data" / "sample")
         self.assertEqual(len(rows), 50)
         self.assertEqual(sum(r["src"] == "중앙" for r in rows), 25)
 
@@ -152,7 +152,7 @@ class TestPacket(unittest.TestCase):
         import io, zipfile
         import packet
         from pipeline import build
-        r = next(x for x in build() if len(x["svc"]["form_files"]) >= 2)
+        r = next(x for x in build(services=load_all(ROOT / "data" / "sample")) if len(x["svc"]["form_files"]) >= 2)
 
         def fetch(url):  # 첫 파일만 받히고 나머지는 실패하는 복지로 흉내
             if url != r["svc"]["form_files"][0]["url"]:
@@ -166,6 +166,21 @@ class TestPacket(unittest.TestCase):
 
 
 class TestApp(unittest.TestCase):
+    def setUp(self):
+        from unittest.mock import patch
+        import streamlit as st
+        st.cache_data.clear()
+        st.cache_resource.clear()
+        self.addCleanup(st.cache_data.clear)
+        self.addCleanup(st.cache_resource.clear)
+        self.sample = load_all(ROOT / "data" / "sample")
+        patched = patch("welfare_api.WelfareAPI")
+        self.api = patched.start().return_value
+        self.addCleanup(patched.stop)
+        self.api.catalog.return_value = {"services": self.sample, "counts": {"central": 25, "local": 25},
+                                         "updated_at": 1794873600, "warnings": []}
+        self.api.services.return_value = self.sample
+
     def test_app_runs(self):
         from streamlit.testing.v1 import AppTest
         at = AppTest.from_file(str(ROOT / "app.py"), default_timeout=60).run()
@@ -191,7 +206,7 @@ class TestApp(unittest.TestCase):
 
     def test_score_ignores_ai_cache(self):
         from pipeline import build
-        self.assertTrue(all(r["ext_source"] == "규칙" for r in build()))
+        self.assertTrue(all(r["ext_source"] == "규칙" for r in build(services=self.sample)))
 
 
 if __name__ == "__main__":

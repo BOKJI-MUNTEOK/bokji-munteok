@@ -2,11 +2,13 @@
 
 OpenAI 호환 Chat Completions API를 표준 라이브러리로 부른다.
 환경변수(.env): LLM_API_KEY(필수, 없으면 OPENAI_API_KEY), LLM_MODEL(기본 gpt-5.6-luna, 수업 자료 모델), OPENAI_BASE_URL(선택).
-프롬프트는 prompts/*.txt. 결과는 data/ai_cache/<servId>.json에 저장해 화면은 API 없이도 열린다.
+프롬프트는 prompts/*.txt. 결과는 data/ai_cache/<servId>.json에 저장하고 원문이 같은 경우 재사용한다.
 """
 import json
+import hashlib
 import os
 import urllib.request
+from functools import lru_cache
 from pathlib import Path
 
 import numcheck
@@ -92,13 +94,31 @@ def make_easy(svc: dict, retries: int = 1) -> dict:
 def run(svc: dict, force: bool = False) -> dict:
     CACHE.mkdir(parents=True, exist_ok=True)
     path = CACHE / f"{svc['servId']}.json"
-    if path.exists() and not force:
-        return json.loads(path.read_text())
-    out = {"model": MODEL, "extract": extract(svc), **make_easy(svc)}
-    path.write_text(json.dumps(out, ensure_ascii=False, indent=1))
+    if not force and (cached := load_cached(svc["servId"], svc)):
+        return cached
+    out = {"model": MODEL, "source_hash": source_hash(svc), "extract": extract(svc), **make_easy(svc)}
+    path.write_text(json.dumps(out, ensure_ascii=False, indent=1), encoding="utf-8")
     return out
 
 
-def load_cached(serv_id: str) -> dict | None:
+def source_hash(svc: dict) -> str:
+    return hashlib.sha256(source_text(svc).encode("utf-8")).hexdigest()
+
+
+@lru_cache(maxsize=1)
+def sample_hashes() -> dict:
+    """기존 AI 캐시의 원문 확인용. 운영 서비스 목록에는 샘플을 넣지 않는다."""
+    from parse import load_all
+    return {s["servId"]: source_hash(s) for s in load_all(ROOT / "data" / "sample")}
+
+
+def load_cached(serv_id: str, svc: dict | None = None) -> dict | None:
     p = CACHE / f"{serv_id}.json"
-    return json.loads(p.read_text()) if p.exists() else None
+    if not p.exists():
+        return None
+    cached = json.loads(p.read_text(encoding="utf-8"))
+    if svc is not None:
+        original = cached.get("source_hash") or sample_hashes().get(serv_id)
+        if original != source_hash(svc):
+            return None
+    return cached

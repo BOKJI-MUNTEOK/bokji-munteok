@@ -48,4 +48,5 @@ def recommend(rows: list[dict], **cond) -> list[tuple[dict, list[str]]]:
     """build() 결과에서 맞는 것만, 많이 맞고 대상이 좁게 정해졌고 신청이 쉬운 순으로.
     생애주기 태그가 많거나(청년·중장년·노년) 없는 서비스는 누구에게나 걸리므로 뒤로 보낸다."""
     out = [(r, why) for r in rows if (why := match(r["svc"], **cond)) is not None]
-    return sorted(out, key=lambda x: (-len(x[1]), len(x[0]["svc"]["life"]) or len(LIFE) + 1, x[0]["score"]))
+    return sorted(out, key=lambda x: (-len(x[1]), len(x[0]["svc"]["life"]) or len(LIFE) + 1,
+                                     x[0]["score"] if x[0]["score"] is not None else float("inf")))
