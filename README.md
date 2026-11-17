@@ -113,6 +113,7 @@ AI 예측이 아니라 정해진 항목을 더하는 방식이라, 점수마다 
 ## 8. 배포 URL
 
 - Vercel 배포 주소: https://bokji-munteok.vercel.app
+- 기존 Streamlit 배포 주소: https://bokji-munteok.streamlit.app
 - `main`에 합친 뒤 Vercel CLI로 배포합니다. 배포 설정은 kdh0381 계정의 Vercel에서 관리합니다.
 
 ## 9. 코드와 실행 방법
