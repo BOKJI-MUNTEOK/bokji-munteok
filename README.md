@@ -114,7 +114,7 @@ AI 예측이 아니라 정해진 항목을 더하는 방식이라, 점수마다 
 
 - Vercel 배포 주소: https://bokji-munteok.vercel.app
 - 기존 Streamlit 배포 주소: https://bokji-munteok.streamlit.app
-- 배포용 인증 키를 등록하면 `main`에 합칠 때 GitHub Actions가 Vercel로 자동 배포합니다. 배포 설정은 kdh0381 계정의 Vercel에서 관리합니다.
+- `main`에 합치면 GitHub Actions가 Vercel로 자동 배포합니다. 배포 설정은 kdh0381 계정의 Vercel에서 관리합니다.
 
 ## 9. 코드와 실행 방법
 
@@ -131,8 +131,9 @@ AI 결과는 `data/ai_cache/`에 저장돼 있어 API 키가 없어도 화면이
 ### Vercel 배포
 
 자동 배포는 `.github/workflows/deploy-vercel.yml`에서 관리합니다.
-저장소의 Actions Secret에 `VERCEL_TOKEN`을 등록하고 이 설정을 `main`에 합치면,
-이후 `main` 변경마다 기존 테스트를 통과한 뒤 현재 Vercel 프로젝트로 운영 배포합니다.
+배포용 `VERCEL_TOKEN`은 저장소의 Actions Secret에 등록했습니다.
+이 설정을 `main`에 합치면 첫 자동 배포가 실행되고,
+이후에도 `main` 변경마다 기존 테스트를 통과한 뒤 현재 Vercel 프로젝트로 운영 배포합니다.
 PR 브랜치에 push하는 것만으로는 배포하지 않습니다.
 
 인증 키 등록과 실행 확인 방법은 [배포 안내](docs/vercel-deployment.md#자동-배포-설정)를 참고합니다.
