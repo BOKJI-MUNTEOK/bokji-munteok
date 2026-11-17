@@ -22,6 +22,7 @@ import rules
 import score
 from pipeline import build
 from welfare_api import APIError, WelfareAPI
+from welfare_store import StoreError
 
 BRAND = "복지문턱"
 LOGO = Path(__file__).resolve().parent / "assets" / "logo"
@@ -161,11 +162,37 @@ try:
     CATALOG = services()
     SV = welfare_client().services(CATALOG)
     ROWS = build(W, "규칙", SV)
+except (APIError, StoreError) as e:
+    fail(str(e))
+    st.stop()
 except Exception as e:
     fail("복지 정보를 불러오지 못했어요. 잠시 후 새로고침해 주세요.", e)
     st.stop()
+
+
+@st.fragment(run_every="30s")
+def sync_status():
+    try:
+        state = welfare_client().refresh_status()
+    except (APIError, StoreError) as exc:
+        st.warning(str(exc))
+        return
+    labels = {"pending": "수집 대기", "listing": "목록 갱신 중", "collecting": "상세 수집 중",
+              "complete": "갱신 완료", "quota": "오늘 한도 도달", "error": "재시도 대기", "waiting": "재시도 대기"}
+    for source, name in (("central", "중앙부처"), ("local", "지자체")):
+        row = state["sources"][source]
+        st.caption(f"{name} 분석 저장 {row['ready']:,}/{row['total']:,}건 · {labels.get(row['status'], '수집 대기')}")
+    st.caption("한국시간 기준 첫 접속 때 자동 갱신하며, 수집 중에도 저장된 자료를 볼 수 있어요.")
+    if state["revision"] != CATALOG["sync"]["revision"]:
+        services.clear()
+        st.rerun()
+
+
+if CATALOG.get("sync"):
+    with st.sidebar:
+        sync_status()
 if not SV:
-    fail("현재 공식 API에 등록된 복지 정보가 없어요. 잠시 후 다시 확인해 주세요.")
+    st.info("공식 복지서비스를 자동 수집하고 있어요. 저장이 완료되면 이 화면에 표시됩니다.")
     st.stop()
 for warning in CATALOG["warnings"]:
     st.warning(warning)
@@ -298,7 +325,7 @@ def detail(r):
         with st.spinner("공식 신청 안내를 불러오고 있어요"):
             svc = welfare_client().detail(r["svc"])
             r = build(W, "규칙", [svc])[0]
-    except APIError as exc:
+    except (APIError, StoreError) as exc:
         st.error(str(exc))
         if r["svc"].get("link"):
             st.link_button("복지로에서 신청 안내 보기", r["svc"]["link"])
@@ -654,9 +681,13 @@ def weights():
 def analysis():
     page_head("데이터 분석", "팀·평가용 › 데이터 분석", "문턱 점수는 AI를 쓰지 않고 정해 둔 기준표로 계산합니다.")
     rows = [r for r in ROWS if r["score"] is not None]
-    st.caption(f"공식 목록 {len(ROWS):,}건 중 상세 조회가 완료된 {len(rows):,}건을 분석합니다. 전체 복지서비스의 통계가 아닙니다.")
+    if len(rows) == len(ROWS):
+        st.caption(f"공식 목록 {len(ROWS):,}건 전체의 저장된 상세 정보를 분석합니다.")
+    else:
+        st.caption(f"공식 목록 {len(ROWS):,}건 중 상세·분석이 저장된 {len(rows):,}건을 분석합니다. "
+                   "남은 자료는 일일 호출 한도 안에서 자동 수집합니다. 전체 복지서비스의 통계가 아닙니다.")
     if not rows:
-        st.info("전체 서비스에서 '신청 방법 보기'를 누르면 상세 정보를 조회하고, 이곳에 문턱 점수 분석이 쌓여요.")
+        st.info("상세 정보를 자동 수집하고 있어요. 저장되는 대로 문턱 점수 분석이 표시됩니다.")
         st.page_link(ALL, label="전체 서비스 보기")
         return
     t1, t2, t3 = st.tabs(["요약", "점수 상세", "검증"])
