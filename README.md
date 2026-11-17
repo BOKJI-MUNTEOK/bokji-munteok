@@ -42,7 +42,7 @@
 <table>
   <thead>
     <tr>
-      <th width="120" nowrap>항목</th>
+      <th nowrap>항목</th>
       <th>내용</th>
     </tr>
   </thead>
@@ -91,7 +91,7 @@ AI 예측이 아니라 정해진 항목을 더하는 방식이라, 점수마다 
 <table>
   <thead>
     <tr>
-      <th width="160" nowrap>대상</th>
+      <th nowrap>대상</th>
       <th>방법</th>
     </tr>
   </thead>
@@ -134,7 +134,7 @@ AI 예측이 아니라 정해진 항목을 더하는 방식이라, 점수마다 
 <table>
   <thead>
     <tr>
-      <th width="90" nowrap>이름</th>
+      <th nowrap>이름</th>
       <th>맡은 일</th>
       <th>GitHub</th>
     </tr>
