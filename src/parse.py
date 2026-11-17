@@ -5,7 +5,7 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-# data/raw(전체 수집본, 커밋 안 함)가 있으면 그것을, 없으면 커밋된 샘플 50건을 쓴다
+# 파일 기반 검증 도구의 기본 경로. 운영 앱은 welfare_api를 통해 실제 API 목록을 쓴다.
 RAW = ROOT / "data" / "raw" if any((ROOT / "data" / "raw").glob("*_list.xml")) else ROOT / "data" / "sample"
 
 
@@ -21,8 +21,8 @@ def _t(el, tag):
     return clean(el.findtext(tag))
 
 
-def parse_central(path: Path) -> dict:
-    r = ET.parse(path).getroot()
+def parse_central(path: Path | ET.Element) -> dict:
+    r = path if isinstance(path, ET.Element) else ET.parse(path).getroot()
     agencies = []  # applmetList: 신청·조사·결정·지급·이의신청 기관
     for a in r.iter("applmetList"):
         agencies.append({"stage": _t(a, "servSeDetailNm"), "desc": _t(a, "servSeDetailLink")})
@@ -47,8 +47,8 @@ def parse_central(path: Path) -> dict:
     }
 
 
-def parse_local(path: Path) -> dict:
-    r = ET.parse(path).getroot()
+def parse_local(path: Path | ET.Element) -> dict:
+    r = path if isinstance(path, ET.Element) else ET.parse(path).getroot()
     forms = [_t(f, "wlfareInfoReldNm") for f in r.iter("basfrmList")]
     files = [{"name": _t(f, "wlfareInfoReldNm"), "url": _t(f, "wlfareInfoReldCn")} for f in r.iter("basfrmList")]
     region = " ".join(x for x in (_t(r, "ctpvNm"), _t(r, "sggNm")) if x)
@@ -102,6 +102,35 @@ def _add_tags(d: dict, m: dict) -> None:
         d[k] = m.get(k, "")
     for k in ("life", "groups", "themes"):
         d[k] = m.get(k, [])
+
+
+def parse_list_item(item: ET.Element, source: str) -> dict:
+    """목록은 검색용이다. 상세를 받기 전의 빈 필드로 점수를 계산하지 않는다."""
+    central = source == "central"
+    d = (parse_central if central else parse_local)(item)
+    d.update(
+        api_source=source, detail_loaded=False,
+        summary=_t(item, "servDgst"),
+        sido=_t(item, "ctpvNm"), sgg=_t(item, "sggNm"),
+        region="전국" if central else " ".join(filter(None, (_t(item, "ctpvNm"), _t(item, "sggNm")))),
+        life=_tags(item, "lifeArray", "lifeNmArray"),
+        groups=_tags(item, "trgterIndvdlArray", "trgterIndvdlNmArray"),
+        themes=_tags(item, "intrsThemaArray", "intrsThemaNmArray"),
+        link=_t(item, "servDtlLink"),
+        online_flag={"Y": True, "N": False}.get(_t(item, "onapPsbltYn")),
+        last_modified=_t(item, "lastModYmd"),
+    )
+    return d
+
+
+def merge_detail(item: dict, root: ET.Element) -> dict:
+    """상세 본문과 목록 전용 필드를 합친다. 목록에서 누락된 값은 상세로 보충한다."""
+    detail = (parse_central if item["api_source"] == "central" else parse_local)(root)
+    merged = {**item, **detail, "detail_loaded": True}
+    for field in ("servNm", "org", "summary", "apply_method_name", "contact"):
+        merged[field] = detail[field] or item[field]
+    merged["online_flag"] = item["online_flag"]
+    return merged
 
 
 def load_all(raw: Path = RAW) -> list[dict]:

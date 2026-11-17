@@ -1,11 +1,13 @@
 """원본 → 추출(규칙/AI) → 점수 표. 화면과 명령줄이 같이 쓴다.
 
 명령줄:
-  python src/pipeline.py            규칙 점수 상위 10개 출력
-  python src/pipeline.py --ai       AI 추출·쉬운 설명을 만들어 data/ai_cache에 저장(.env의 LLM_API_KEY 필요)
-  python src/pipeline.py --template eval/gold_template.csv   검증용 빈 정답표 만들기
+  python src/pipeline.py                   API 목록 건수·상세 캐시의 점수 상위 10개
+  python src/pipeline.py --sample          고정 샘플의 규칙 계산 재현
+  python src/pipeline.py --sample --ai     샘플 AI 결과 생성(.env의 LLM_API_KEY 필요)
+  python src/pipeline.py --sample --template eval/gold_template.csv   검증용 빈 정답표 만들기
 """
 import sys
+from pathlib import Path
 
 import evaluate
 import llm
@@ -15,27 +17,43 @@ from parse import load_all
 
 
 def build(weights: dict | None = None, mode: str = "규칙", services: list[dict] | None = None) -> list[dict]:
-    services = services or load_all()
+    if services is None:
+        from welfare_api import WelfareAPI
+        api = WelfareAPI()
+        services = api.services(api.catalog())
     rows = []
     for s in services:
-        ai = llm.load_cached(s["servId"])
+        if not s.get("detail_loaded", True):
+            rows.append({"svc": s, "score": None, "ai": None, "ext": None,
+                         "reason": "상세 조회 후 문턱 점수를 계산합니다."})
+            continue
+        ai = llm.load_cached(s["servId"], s)
         ext = ai["extract"] if (mode == "AI" and ai) else rules.extract(s)
         read = score.readability(s)
         sc = score.score(ext, read, weights)
         rows.append({"svc": s, "ext": ext, "ext_source": "AI" if (mode == "AI" and ai) else "규칙",
                      "read": read, "ai": ai, **sc})
-    rows.sort(key=lambda r: -r["score"])
+    rows.sort(key=lambda r: (r["score"] is None, -(r["score"] or 0)))
     return rows
 
 
 def main(argv):
-    services = load_all()
+    # 고정 샘플은 --sample을 명시한 경우에만 쓴다.
+    if "--sample" in argv:
+        services = load_all(Path(__file__).resolve().parent.parent / "data" / "sample")
+    else:
+        from welfare_api import WelfareAPI
+        api = WelfareAPI()
+        catalog = api.catalog()
+        services = api.services(catalog)
+        print("공식 API 목록:", len(services), "건 / 상세 조회 완료:", sum(s["detail_loaded"] for s in services), "건")
     if "--template" in argv:
         path = argv[argv.index("--template") + 1]
-        evaluate.write_template(services, __import__("pathlib").Path(path))
+        evaluate.write_template(services, Path(path))
         print("정답표 틀 저장:", path)
         return
     if "--ai" in argv:
+        services = [s for s in services if s.get("detail_loaded", True)]
         from concurrent.futures import ThreadPoolExecutor
         force = "--force" in argv
 
@@ -50,7 +68,7 @@ def main(argv):
             for i, msg in enumerate(ex.map(one, services), 1):
                 print(f"[{i}/{len(services)}] {msg}", flush=True)
         return
-    for r in build(services=services)[:10]:
+    for r in [r for r in build(services=services) if r["score"] is not None][:10]:
         print(r["score"], r["svc"]["servNm"], "-", r["reason"])
 
 

@@ -1,6 +1,8 @@
 """복지문턱 시연 화면. 실행: .venv/bin/python -m streamlit run app.py"""
 import re
 import sys
+from datetime import datetime, timedelta, timezone
+from html import escape
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
@@ -18,8 +20,8 @@ import packet
 import paperwork
 import rules
 import score
-from parse import load_all
 from pipeline import build
+from welfare_api import APIError, WelfareAPI
 
 BRAND = "복지문턱"
 LOGO = Path(__file__).resolve().parent / "assets" / "logo"
@@ -117,9 +119,27 @@ def band(s: int):
     return next(b for b in BANDS if b[2] <= s < b[3])
 
 
-@st.cache_data(show_spinner="복지 정보를 불러오고 있어요")
+@st.cache_resource
+def welfare_client():
+    return WelfareAPI()
+
+
+@st.cache_data(ttl=60, show_spinner="공식 복지서비스 목록을 불러오고 있어요")
 def services():
-    return load_all()
+    return welfare_client().catalog()
+
+
+def updated_time(timestamp):
+    return datetime.fromtimestamp(timestamp, timezone(timedelta(hours=9))).strftime("%Y-%m-%d %H:%M")
+
+
+def online_status(r):
+    if r["ext"] is not None:
+        return r["ext"]["online"]
+    svc = r["svc"]
+    if svc["online_flag"] is not None:
+        return svc["online_flag"]
+    return rules.detect_online(svc) if svc["apply_method_name"] else None
 
 
 def fail(msg, err=None):
@@ -138,14 +158,17 @@ if "W" not in st.session_state:
     st.session_state.W = dict(score.DEFAULT_WEIGHTS)
 W = st.session_state.W
 try:
-    SV = services()
+    CATALOG = services()
+    SV = welfare_client().services(CATALOG)
     ROWS = build(W, "규칙", SV)
-except Exception as e:  # 데이터 파일이 없거나 깨졌을 때
-    fail("복지 정보를 불러오지 못했어요. 잠시 후 새로고침해 주세요. 계속되면 data 폴더를 확인해 주세요.", e)
+except Exception as e:
+    fail("복지 정보를 불러오지 못했어요. 잠시 후 새로고침해 주세요.", e)
     st.stop()
 if not SV:
-    fail("불러온 복지 정보가 없어요. data 폴더에 수집 파일이 있는지 확인해 주세요.")
+    fail("현재 공식 API에 등록된 복지 정보가 없어요. 잠시 후 다시 확인해 주세요.")
     st.stop()
+for warning in CATALOG["warnings"]:
+    st.warning(warning)
 
 
 # ── 공통 조각 ──────────────────────────────────────────
@@ -161,7 +184,11 @@ def benefit(text: str) -> str:
 def easy_cards(r):
     s, ai = r["svc"], r["ai"]
     if not ai:
-        st.info("아직 쉬운 설명이 없습니다.")
+        st.info("아직 이 원문의 쉬운 설명이 없습니다. 복지로 공식 안내를 그대로 보여 드려요.")
+        for field, label in (("target", "누가 받을 수 있나요"), ("criteria", "선정기준"),
+                             ("benefit", "무엇을 받나요"), ("apply", "어떻게 신청하나요")):
+            st.markdown(f"**{label}**")
+            st.text(s[field] or "공식 안내에 내용이 없습니다.")
         return
     e = ai["easy"]
     how = ("온라인 신청 가능" if r["ext"]["online"] else "방문 신청") + (f"<br>{e['steps'][0]}" if e["steps"] else "")
@@ -264,13 +291,25 @@ def score_parts(r):
     st.caption(f"기준표 계산 · 원점수 {r['raw']} · AI를 쓰지 않음")
 
 
-@st.dialog("신청 안내", width="large")
+@st.dialog("신청 안내", width="large", on_dismiss="rerun")
 def detail(r):
     """시민용: 쉬운 설명과 챙길 것만 앞에, 점수·원문은 뒤 탭에."""
+    try:
+        with st.spinner("공식 신청 안내를 불러오고 있어요"):
+            svc = welfare_client().detail(r["svc"])
+            r = build(W, "규칙", [svc])[0]
+    except APIError as exc:
+        st.error(str(exc))
+        if r["svc"].get("link"):
+            st.link_button("복지로에서 신청 안내 보기", r["svc"]["link"])
+        return
     s = r["svc"]
+    if s.get("detail_warning"):
+        st.warning(s["detail_warning"])
     b = band(r["score"])
-    st.markdown(f"<div class='dlg-t'>{s['servNm']}</div><div class='dlg-sub'>{s['org']} · {s['region']} · "
+    st.markdown(f"<div class='dlg-t'>{escape(s['servNm'])}</div><div class='dlg-sub'>{escape(s['org'])} · {escape(s['region'])} · "
                 f"<span class='band band-{b[0]}'>{b[1]} · 문턱 {r['score']}점</span></div>", unsafe_allow_html=True)
+    st.caption(f"상세 조회: {updated_time(s['detail_fetched_at'])} (한국시간)")
     t1, t2, t3, t4 = st.tabs(["쉬운 설명", "서류 준비", "왜 이 점수?", "원문"])
     with t1:
         easy_cards(r)
@@ -287,13 +326,13 @@ def detail(r):
 
 def card(r, key, why=None):
     s = r["svc"]
-    b = band(r["score"])
+    b = band(r["score"]) if r["score"] is not None else None
     what = r["ai"]["easy"]["what"] if r["ai"] else s["summary"]
     money = benefit(what)
     with st.container(border=True):
-        st.badge(b[1], color=b[4])
-        st.markdown(f"<div class='svc'>{s['servNm']}</div><div class='money-line'>{f'💰 {money}' if money else '&nbsp;'}</div>"
-                    f"<div class='what'>{what}</div>", unsafe_allow_html=True)
+        st.badge(b[1] if b else "상세 확인 전", color=b[4] if b else "gray")
+        st.markdown(f"<div class='svc'>{escape(s['servNm'])}</div><div class='money-line'>{f'💰 {escape(money)}' if money else '&nbsp;'}</div>"
+                    f"<div class='what'>{escape(what)}</div>", unsafe_allow_html=True)
         st.caption(" · ".join(why) if why else s["region"])
         if st.button("신청 방법 보기", key=key, width="stretch"):
             detail(r)
@@ -305,6 +344,19 @@ def grid(items, prefix, n=3):
         for col, (r, why) in zip(st.columns(n), items[i:i + n]):
             with col:
                 card(r, f"{prefix}_{r['svc']['servId']}", why)
+
+
+def paged_grid(items, prefix, n=3):
+    """목록 전체는 유지하고 한 화면에 24건씩 보여 준다."""
+    pages = max(1, (len(items) + 23) // 24)
+    page = 1
+    if pages > 1:
+        key = f"{prefix}_page"
+        if st.session_state.get(key, 1) > pages:
+            st.session_state[key] = 1
+        page = st.number_input("페이지", min_value=1, max_value=pages, step=1, key=key)
+        st.caption(f"{page} / {pages}페이지 · 전체 {len(items):,}건")
+    grid(items[(page - 1) * 24:page * 24], prefix, n)
 
 
 # ── 페이지 ────────────────────────────────────────────
@@ -322,7 +374,7 @@ def form_widget(key, quick):
         if ss.get("f_sgg") not in ["전체"] + sggs:
             ss.f_sgg = "전체"
         sgg = st.selectbox("시·군·구", ["전체"] + sggs, key="f_sgg", disabled=sido == "선택 안 함")
-        st.caption("시연 샘플에 있는 지역만 나와요. 고르지 않으면 전국 복지만 찾아요.")
+        st.caption("공식 복지 목록에 등록된 지역이에요. 고르지 않으면 전국 복지만 찾아요.")
         return "없음" if sido == "선택 안 함" else f"{sido} {'' if sgg == '전체' else sgg}"
     if key == "age":
         age = st.number_input("나이", 0, 120, value=None, step=1, key="f_age", placeholder="예: 32", label_visibility="collapsed")
@@ -396,25 +448,28 @@ def report(p):
     st.markdown(f"### {who} {len(hit)}개")
     st.caption(" · ".join(([] if quick else intake.summary(p))) or "질문 없이 대상으로만 고른 결과예요. 지역을 고르면 동네 복지도 함께 찾아요.")
     if not recs:
-        st.warning("말씀하신 조건에 맞는 복지를 샘플에서 찾지 못했어요. '다시 고르기'를 눌러 조건을 바꿔 보세요.")
+        st.warning("말씀하신 조건에 맞는 복지를 찾지 못했어요. '다시 고르기'를 눌러 조건을 바꿔 보세요.")
         return
     rs = [r for r, _ in hit]
-    stats = [("신청이 쉬운 것", sum(band(r["score"])[0] == "낮음" for r in rs)),
-             ("온라인 신청 가능", n_online := sum(r["ext"]["online"] for r in rs)),
+    scored = [r for r in rs if r["score"] is not None]
+    stats = [("신청이 쉬운 것(조회 완료)", sum(band(r["score"])[0] == "낮음" for r in scored)),
+             ("온라인 신청 가능", sum(online_status(r) is True for r in rs)),
              ("우리 동네 복지", sum(r["svc"]["src"] == "지자체" for r in rs))]
     stats = [("찾은 복지", len(rs))] + [x for x in stats if x[1]]  # 0인 칸은 숨긴다
     for col, (label, n) in zip(st.columns(4), stats):
         col.metric(label, f"{n}개", border=True)
-    easiest = rs[0] if band(rs[0]["score"])[0] == "낮음" else min(rs, key=lambda r: r["score"])
-    st.info(f"**{easiest['svc']['servNm']}**부터 알아보세요. 조건이 잘 맞고 신청 문턱이 {easiest['score']}점으로 낮은 편이에요."
-            + ("" if n_online else " 온라인으로 신청할 수 있는 복지는 없어서 주민센터 방문이 필요해요."))
+    if scored:
+        easiest = min(scored, key=lambda r: r["score"])
+        st.info(f"상세를 확인한 {len(scored)}건 중 **{easiest['svc']['servNm']}**의 문턱 점수가 {easiest['score']}점으로 가장 낮아요.")
+    st.caption("공식 태그로 먼저 찾은 목록이에요. '신청 방법 보기'를 누르면 세부 지원 조건을 확인하고 문턱 점수를 계산해요. "
+               "신청 난이도 비교는 상세를 확인한 서비스에만 적용돼요.")
     grid(hit[:4], "rec", n=2)
     if len(hit) > 4:
         with st.expander(f"나머지 {len(hit) - 4}개 더 보기"):
-            grid(hit[4:], "rec_more", n=2)
+            paged_grid(hit[4:], "rec_more", n=2)
     if loose:
         with st.expander(f"대상 구분 없이 누구나 볼 수 있는 복지 {len(loose)}개"):
-            grid(loose, "rec_loose", n=2)
+            paged_grid(loose, "rec_loose", n=2)
     st.caption("공식 목록의 지역·생애주기·대상 태그로 고른 결과예요. 실제 자격은 담당 기관에서 확인해요.")
 
 
@@ -453,7 +508,7 @@ def chat():
 
     if ss.qi < len(intake.QUESTIONS):
         key, _, quick = intake.QUESTIONS[ss.qi]
-        if key == "place":  # 빠른 답: 샘플에 있는 지역
+        if key == "place":  # 빠른 답: 공식 목록에 있는 지역
             quick = sorted({g for _, g in PLACES if g})[:6]
         if quick:
             pick = st.pills("빠른 답", quick, key=f"quick_{ss.qi}_{len(ss.msgs)}", label_visibility="collapsed")
@@ -508,7 +563,7 @@ def home():
                 st.switch_page(FIND)
             if st.button("전체 서비스 보기 ›", type="tertiary", key="home_all"):
                 st.switch_page(ALL)
-        st.markdown(f"<div class='home-meta'>질문 {n}개 · 시연용 샘플 {len(SV)}개 서비스로 동작 · 입력한 내용은 저장하지 않아요</div>",
+        st.markdown(f"<div class='home-meta'>질문 {n}개 · 공식 복지서비스 {len(SV):,}개 · 입력한 내용은 저장하지 않아요</div>",
                     unsafe_allow_html=True)
     if demo := next((r for r in ROWS if r["svc"]["servNm"] == DEMO), None):
         st.markdown("<div class='sec-t'>시연 서비스</div>", unsafe_allow_html=True)
@@ -533,7 +588,7 @@ def mine():
     done = ss.get("qi", 0) >= n if ss.mode == "상담으로 찾기" else ss.get("fi", 0) >= n
     # 정부24·복지로처럼 위치 표시 + 밑줄 제목. 이름은 사이드바 로고에 있으니 '무엇을 하면 되는지'를 제목으로
     page_head("내가 받을 수 있는 복지" if done else f"질문 {n}개로 받을 수 있는 복지 찾기", "내 복지 찾기",
-              f"ⓘ 시연용 샘플 <b>{len(SV)}개 서비스</b> 안에서 찾아요")
+              f"ⓘ 공식 복지 목록 <b>{len(SV):,}개 서비스</b>에서 찾아요")
     left, right = st.columns([3, 1], gap="large")
     with left:
         mode = st.segmented_control("방법", list(MODES), key="mode", label_visibility="collapsed", width="stretch",
@@ -558,19 +613,22 @@ def browse():
         f = st.columns([2, 3, 2, 2], vertical_alignment="center")
         src = f[0].pills("구분", ["중앙", "지자체"], selection_mode="multi", default=["중앙", "지자체"])
         lv = f[1].segmented_control("신청 난이도", ["전체"] + [b[1].replace("신청 ", "") for b in BANDS], default="전체")
-        order = f[2].selectbox("정렬", ["신청 쉬운 순", "신청 어려운 순", "이름순"])
+        order = f[2].selectbox("정렬", ["이름순", "신청 쉬운 순", "신청 어려운 순"])
         online = f[3].toggle("온라인 신청 가능만")
     rows = [r for r in ROWS if r["svc"]["src"] in src
-            and (lv in (None, "전체") or band(r["score"])[1].endswith(lv))
-            and (not online or r["ext"]["online"])
+            and (lv in (None, "전체") or (r["score"] is not None and band(r["score"])[1].endswith(lv)))
+            and (not online or online_status(r) is True)
             and (not q or q in r["svc"]["servNm"] + r["svc"]["org"] + r["svc"]["region"] + r["svc"]["summary"])]
     if order == "신청 쉬운 순":
-        rows = rows[::-1]
+        rows = sorted(rows, key=lambda r: (r["score"] is None, r["score"] or 0))
+    elif order == "신청 어려운 순":
+        rows = sorted(rows, key=lambda r: (r["score"] is None, -(r["score"] or 0)))
     elif order == "이름순":
         rows = sorted(rows, key=lambda r: r["svc"]["servNm"])
-    st.caption(f"{len(rows)}건")
+    st.caption(f"{len(rows):,}건 · 문턱 점수 조회 완료 {sum(r['score'] is not None for r in ROWS):,}건 / 전체 {len(ROWS):,}건")
+    st.caption("신청 난이도 필터·점수 정렬은 상세를 조회한 서비스 기준이에요. 미조회 서비스는 점수순 정렬에서 뒤에 나와요.")
     if rows:
-        grid([(r, None) for r in rows], "all")
+        paged_grid([(r, None) for r in rows], "all")
     else:
         st.info("조건에 맞는 서비스가 없어요. 검색어나 필터를 바꿔 보세요.")
 
@@ -595,14 +653,20 @@ def weights():
 
 def analysis():
     page_head("데이터 분석", "팀·평가용 › 데이터 분석", "문턱 점수는 AI를 쓰지 않고 정해 둔 기준표로 계산합니다.")
+    rows = [r for r in ROWS if r["score"] is not None]
+    st.caption(f"공식 목록 {len(ROWS):,}건 중 상세 조회가 완료된 {len(rows):,}건을 분석합니다. 전체 복지서비스의 통계가 아닙니다.")
+    if not rows:
+        st.info("전체 서비스에서 '신청 방법 보기'를 누르면 상세 정보를 조회하고, 이곳에 문턱 점수 분석이 쌓여요.")
+        st.page_link(ALL, label="전체 서비스 보기")
+        return
     t1, t2, t3 = st.tabs(["요약", "점수 상세", "검증"])
     # 항목 점수도 문턱 점수와 같은 100점 환산으로 맞춘다(원점수와 섞지 않게)
-    scaled = [{k: v * r["score"] / r["raw"] if r["raw"] else 0 for k, v in r["parts"].items()} for r in ROWS]
+    scaled = [{k: v * r["score"] / r["raw"] if r["raw"] else 0 for k, v in r["parts"].items()} for r in rows]
     df = pd.DataFrame([{"점수": r["score"], "구분": r["svc"]["src"], "온라인": r["ext"]["online"],
-                        "구간": band(r["score"])[0], **p} for r, p in zip(ROWS, scaled)])
-    items = list(ROWS[0]["parts"])
+                        "구간": band(r["score"])[0], **p} for r, p in zip(rows, scaled)])
+    items = list(rows[0]["parts"])
     with t1:
-        have = [r for r in ROWS if r["ai"]]
+        have = [r for r in rows if r["ai"]]
         ok = sum(not r["ai"]["needs_review"] for r in have)
         c = st.columns(4)
         c[0].metric("분석한 복지서비스", f"{len(df)}건", border=True)
@@ -632,10 +696,10 @@ def analysis():
         weights()  # 접어 두고 차트에 폭을 준다
         with st.container(border=True):
             st.markdown("**문턱이 높은 서비스 15개 · 항목별 점수**")
-            st.markdown(f"<div class='insight'>가장 까다로운 곳은 <b>{ROWS[0]['svc']['servNm']}</b>({ROWS[0]['score']}점)이에요. "
+            st.markdown(f"<div class='insight'>조회한 서비스 중 가장 까다로운 곳은 <b>{escape(rows[0]['svc']['servNm'])}</b>({rows[0]['score']}점)이에요. "
                         "막대 전체 길이가 문턱 점수(100점 환산)예요.</div>", unsafe_allow_html=True)
             top = pd.DataFrame([{"서비스": r["svc"]["servNm"], "항목": k, "점수": round(v, 1)}
-                                for r, p in zip(ROWS[:15], scaled[:15]) for k, v in p.items()])
+                                for r, p in zip(rows[:15], scaled[:15]) for k, v in p.items()])
             st.altair_chart(alt.Chart(top).mark_bar().encode(
                 x=alt.X("sum(점수):Q", title="문턱 점수(100점 환산)", scale=alt.Scale(domain=[0, 100])),
                 y=alt.Y("서비스:N", sort="-x", title=None, axis=alt.Axis(labelLimit=420, labelOverlap=False, labelFontSize=12)),
@@ -646,24 +710,28 @@ def analysis():
             "이유": r["reason"], "온라인": "가능" if r["ext"]["online"] else "불가",
             "조건 수": len(r["ext"]["conditions"]), "기관 단계": len(r["ext"]["agencies"]),
             "서류 수": len(r["ext"]["documents"]) if r["ext"].get("documents") else None,
-        } for r in ROWS]), hide_index=True, width="stretch",
+        } for r in rows]), hide_index=True, width="stretch",
             column_config={"점수": st.column_config.ProgressColumn("점수", min_value=0, max_value=100, format="%d")})
     with t3:
-        rule_sum = {s["servId"]: evaluate.summarize(rules.extract(s)) for s in SV}
-        ai_sum = {s["servId"]: evaluate.summarize(c["extract"]) for s in SV if (c := llm.load_cached(s["servId"]))}
-        gold = evaluate.load_gold()
+        rule_sum = {r["svc"]["servId"]: evaluate.summarize(r["ext"]) for r in rows}
+        ai_sum = {r["svc"]["servId"]: evaluate.summarize(r["ai"]["extract"]) for r in rows if r["ai"]}
+        # 기존 정답표와 다른 시점의 원문을 비교해 정확도라고 표시하지 않는다.
+        unchanged = {r["svc"]["servId"] for r in rows
+                     if llm.sample_hashes().get(r["svc"]["servId"]) == llm.source_hash(r["svc"])}
+        gold = {key: value for key, value in evaluate.load_gold().items() if key in unchanged}
         a, b = st.columns(2)
         with a.container(border=True):
             st.markdown("**정답표와 비교 (일치율 %)**")
             if gold:
                 mix = evaluate.gold_mix()
-                st.caption(f"정답표 {len(gold)}건 · AI 초안을 사람이 검수 {mix['사람 검수']}건 · AI가 작성·재검토 {mix['AI 재검토']}건 (기준: eval/README.md)")
+                st.caption(f"현재 조회 자료와 원문이 같은 정답표 {len(gold)}건만 비교합니다. 기존 정답표 구성: "
+                           f"사람 검수 {mix['사람 검수']}건 · AI 재검토 {mix['AI 재검토']}건 (기준: eval/README.md)")
                 r_cmp, a_cmp = evaluate.compare(rule_sum, gold), evaluate.compare(ai_sum, gold)
                 st.dataframe(pd.DataFrame({"항목": [evaluate.LABELS[f] for f in evaluate.FIELDS],
                                            "기준표(규칙)": [r_cmp[f] for f in evaluate.FIELDS],
                                            "AI": [a_cmp[f] for f in evaluate.FIELDS]}), hide_index=True, width="stretch")
             else:
-                st.info("아직 채운 정답표가 없습니다. 각자 `eval/gold_이름.csv`를 채워 올리면 여기에 정확도가 나옵니다. 기준은 `eval/README.md`.")
+                st.info("현재 상세 조회 자료와 원문이 일치하는 정답표가 없습니다. 새 원문의 정답표 검증이 필요합니다. 기준은 `eval/README.md`.")
         with b.container(border=True):
             st.markdown("**기준표(규칙)와 AI가 같은 답을 낸 비율** (정답표 전 참고용)")
             if ai_sum:
@@ -703,7 +771,8 @@ def guide():
 #### 신청 준비 (11/17 이후 구현, AI 없음)
 신청서·위임장 빈칸 채우기, 서류 발급처 안내, 직권 신청 요청 문구. 접수 대행은 하지 않습니다.
 """)
-    st.caption(f"자료: 한국사회보장정보원 복지서비스 API(공공데이터포털, 중앙부처 15090532 · 지자체 15108347) 샘플 {len(SV)}건, 2026-11-10 수집")
+    st.caption(f"자료: 한국사회보장정보원 복지서비스 API(공공데이터포털, 중앙부처 15090532 · 지자체 15108347) "
+               f"목록 {len(SV):,}건 · 조회 {updated_time(CATALOG['updated_at'])} (한국시간)")
 
 
 FIND = st.Page(mine, title="내 복지 찾기", icon=":material/person_search:", url_path="find")
@@ -713,7 +782,8 @@ nav = st.navigation({"시민용": [st.Page(home, title="홈", icon=":material/ho
                              st.Page(guide, title="안내", icon=":material/info:", url_path="guide")]}, position="sidebar")
 st.logo(str(LOGO / "mark.svg"), size="large", icon_image=str(LOGO / "mark.svg"))  # 이름은 아래 CSS로 본문과 같은 글꼴로 붙인다
 with st.sidebar:
-    st.caption(f"샘플 {len(SV)}건 · 중앙 25 · 지자체 25\n\n입력한 내용은 저장하지 않아요.")
+    st.caption(f"공식 목록 {len(SV):,}건 · 중앙 {CATALOG['counts']['central']:,} · 지자체 {CATALOG['counts']['local']:,}\n\n"
+               f"목록 조회: {updated_time(CATALOG['updated_at'])}\n\n입력한 내용은 저장하지 않아요.")
 try:
     nav.run()
     st.markdown(f"<div class='site-foot'>{GOV_NOTICE}<br>자료: 한국사회보장정보원 복지서비스 API(공공데이터포털)</div>",
