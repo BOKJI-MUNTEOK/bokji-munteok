@@ -48,6 +48,7 @@ GitHub Actions 워크플로로 `main` 변경을 자동 배포합니다.
 ## 배포 구성
 
 - Vercel Framework Preset: **Container**
+- 실행 지역: `vercel.json`의 `regions: ["icn1"]`로 서울 지정. MongoDB Atlas(AWS 서울)와 같은 지역을 사용합니다.
 - Root Directory: 저장소 루트
 - Dockerfile: 루트의 `Dockerfile`
 - 실행: `python -m streamlit run app.py --server.address=0.0.0.0 --server.port=80 --server.headless=true`
@@ -71,7 +72,9 @@ Streamlit 자체가 제공하는 화면, 대화 세션, 추천, 분석, 서류 �
 
 각 6시간 구간마다 전체 목록을 비교하고 같은 구간 재실행에서는 완료한 목록을 재호출하지 않습니다. 네 번의 작업은 같은 일일 호출 예산을 공유하고, 예산은 한국시간 자정에만 초기화됩니다. 오류·시간 제한으로 미완료된 작업은 Actions에서 실패로 표시하며 저장 자료는 보존해 다음 예약 실행에서 이어받습니다. 실행 이력 확인이나 수동 재개는 [Welfare Data Sync](https://github.com/BOKJI-MUNTEOK/bokji-munteok/actions/workflows/sync-welfare.yml)의 `Run workflow`에서 `main`을 선택합니다. 데이터 갱신은 DB만 변경하며 웹을 재배포하거나 Git 커밋을 만들지 않습니다.
 
-웹에서 갱신 시작·진행 상태 폴링을 제거했습니다. 저장 자료를 5분간 캐시하고 만료 후 사용자가 새로고침하거나 조작할 때 DB 변경 번호를 한 번 확인합니다. 변경이 없으면 이미 읽은 자료를 재사용하고, 건수도 그 자료에서 계산해 별도의 전체 조인·호출량 조회를 하지 않습니다. 열어 둔 화면은 자동으로 반복 조회하지 않으며, 사이드바 건수는 화면에 읽어 온 자료 기준입니다.
+웹에서 갱신 시작·진행 상태 폴링을 제거했습니다. 저장 자료를 5분간 캐시하고 만료 후 새로고침·메뉴 이동 등 전체 화면 실행 시 DB 변경 번호를 한 번 확인합니다. 변경이 없으면 이미 읽은 자료를 재사용하고, 건수도 그 자료에서 계산해 별도의 전체 조인·호출량 조회를 하지 않습니다. 열어 둔 화면은 자동으로 반복 조회하지 않으며, 사이드바 건수는 화면에 읽어 온 자료 기준입니다.
+
+질문·상담·전체 서비스 검색은 Streamlit fragment로 분리했습니다. 질문 이동과 가중치 변경은 콜백에서 처리해 같은 입력으로 전체 스크립트를 두 번 실행하지 않습니다. 점수 캐시는 목록 조회 시각·MongoDB revision·가중치를 키로 하며 최대 8개 조합을 유지합니다. 공개 복지 자료만 캐시하고 입력한 개인정보는 캐시에 넣지 않습니다. 분석 탭은 선택한 내용만 계산하고, 분포 차트는 같은 점수·구간의 건수를 집계해 전송량을 줄입니다. 이를 위해 Streamlit 1.58 이상을 사용합니다.
 
 [GitHub 예약 실행의 제약](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#schedule): 대기열이 혼잡하면 정각보다 늦게 시작하거나 예약 작업이 누락될 수 있습니다. 공개 저장소에 60일간 활동이 없으면 예약 워크플로가 자동 비활성화될 수 있으므로 Actions에서 활성 상태를 확인합니다.
 

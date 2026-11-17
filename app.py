@@ -130,6 +130,12 @@ def services():
     return welfare_client().catalog()
 
 
+@st.cache_data(max_entries=8, show_spinner=False)
+def scored_rows(weights, version, _services):
+    """공개 자료의 버전과 가중치로 캐시한다. 큰 원문 목록은 매번 해시하지 않는다."""
+    return build(weights, "규칙", _services)
+
+
 def updated_time(timestamp):
     return datetime.fromtimestamp(timestamp, timezone(timedelta(hours=9))).strftime("%Y-%m-%d %H:%M")
 
@@ -161,7 +167,8 @@ W = st.session_state.W
 try:
     CATALOG = services()
     SV = welfare_client().services(CATALOG)
-    ROWS = build(W, "규칙", SV)
+    version = (CATALOG.get("sync", {}).get("revision"), CATALOG["updated_at"])
+    ROWS = scored_rows(W, version, SV)
 except (APIError, StoreError) as e:
     fail(str(e))
     st.stop()
@@ -311,9 +318,11 @@ def score_parts(r):
 def detail(r):
     """시민용: 쉬운 설명과 챙길 것만 앞에, 점수·원문은 뒤 탭에."""
     try:
-        with st.spinner("공식 신청 안내를 불러오고 있어요"):
-            svc = welfare_client().detail(r["svc"])
-            r = build(W, "규칙", [svc])[0]
+        # 목록 스냅샷에 이미 포함된 상세·점수를 재사용한다.
+        if not r["svc"].get("detail_loaded", True):
+            with st.spinner("공식 신청 안내를 불러오고 있어요"):
+                svc = welfare_client().detail(r["svc"])
+                r = build(W, "규칙", [svc])[0]
     except (APIError, StoreError) as exc:
         st.error(str(exc))
         if r["svc"].get("link"):
@@ -382,7 +391,7 @@ FORM_Q = {"place": "살고 계신 지역은 어디세요?", "age": "나이가 �
 
 
 def form_widget(key, quick):
-    """질문 하나의 입력칸. 답을 글로 돌려줘 상담과 같은 intake.take()로 읽는다."""
+    """질문 하나의 입력칸. 다음 버튼 콜백이 최신 위젯 값을 읽는다."""
     ss = st.session_state
     if key == "place":
         sido = st.selectbox("시·도", ["선택 안 함"] + sorted({s for s, _ in PLACES}), key="f_sido")
@@ -391,18 +400,65 @@ def form_widget(key, quick):
             ss.f_sgg = "전체"
         sgg = st.selectbox("시·군·구", ["전체"] + sggs, key="f_sgg", disabled=sido == "선택 안 함")
         st.caption("공식 복지 목록에 등록된 지역이에요. 고르지 않으면 전국 복지만 찾아요.")
-        return "없음" if sido == "선택 안 함" else f"{sido} {'' if sgg == '전체' else sgg}"
+        return
     if key == "age":
-        age = st.number_input("나이", 0, 120, value=None, step=1, key="f_age", placeholder="예: 32", label_visibility="collapsed")
-        return "" if age is None else f"{int(age)}세"
+        st.number_input("나이", 0, 120, value=None, step=1, key="f_age", placeholder="예: 32", label_visibility="collapsed")
+        return
     multi = key != "job"
     pick = st.pills(key, quick, selection_mode="multi" if multi else "single", key=f"f_{key}", label_visibility="collapsed")
     picks = (pick or []) if multi else ([pick] if pick else [])
     if intake.ETC in picks:  # 기타를 고르면 직접 적는다
-        etc = st.text_input("직접 입력", key=f"f_{key}_etc", placeholder="자유롭게 적어 주세요")
-        picks = [x for x in picks if x != intake.ETC] + ([etc] if etc.strip() else [])
+        st.text_input("직접 입력", key=f"f_{key}_etc", placeholder="자유롭게 적어 주세요")
     st.caption("여러 개 골라도 돼요. 없으면 그냥 넘어가세요." if multi else "가장 가까운 것 하나를 골라 주세요.")
+
+
+def form_answer(key):
+    """입력 직후 다음을 눌러도 이전 렌더의 답을 쓰지 않도록 세션에서 읽는다."""
+    ss = st.session_state
+    if key == "place":
+        sido, sgg = ss.get("f_sido", "선택 안 함"), ss.get("f_sgg", "전체")
+        if sido == "선택 안 함":
+            return "없음"
+        return f"{sido} {sgg if (sido, sgg) in PLACES else ''}".strip()
+    if key == "age":
+        age = ss.get("f_age")
+        return "" if age is None else f"{int(age)}세"
+    pick = ss.get(f"f_{key}")
+    picks = (pick or []) if key != "job" else ([pick] if pick else [])
+    if intake.ETC in picks:
+        etc = ss.get(f"f_{key}_etc", "").strip()
+        picks = [x for x in picks if x != intake.ETC] + ([etc] if etc else [])
     return ", ".join(picks) or "없음"
+
+
+def form_next():
+    ss = st.session_state
+    key = intake.QUESTIONS[ss.fi][0]
+    text = form_answer(key)
+    if error := intake.take(intake.new_profile(), key, text, PLACES):
+        ss.form_error = error
+        return
+    ss.form[key] = text
+    ss.form_raw.update({k: ss[k] for k in ss if k.startswith("f_")})
+    ss.fi += 1
+    ss.pop("form_error", None)
+
+
+def form_previous():
+    ss = st.session_state
+    ss.form_raw.update({k: ss[k] for k in ss if k.startswith("f_")})
+    ss.fi = max(0, ss.fi - 1)
+    ss.pop("form_error", None)
+
+
+def form_reset():
+    ss = st.session_state
+    ss.fi, ss.form, ss.form_raw = 0, {}, {}
+    for key in ("quick", "quick_name", "form_error"):
+        ss.pop(key, None)
+    for key in list(ss):
+        if key.startswith("f_"):
+            del ss[key]
 
 
 def steps():
@@ -414,11 +470,7 @@ def steps():
     n = len(intake.QUESTIONS)
     if ss.fi >= n:
         top = st.columns([4, 1])
-        if top[1].button("다시 고르기", width="stretch"):
-            ss.fi, ss.form, ss.form_raw = 0, {}, {}
-            ss.pop("quick", None)
-            ss.pop("quick_name", None)
-            st.rerun()
+        top[1].button("다시 고르기", width="stretch", key="form_reset", on_click=form_reset)
         p = intake.build(ss.form, PLACES)
         if q := ss.get("quick"):  # 자주 찾는 복지 버튼으로 바로 온 경우
             p.update(q)
@@ -434,20 +486,14 @@ def steps():
         # 질문 목록이 바뀌어도 깨지지 않게, 화면용 문구가 없으면 상담 질문 문장을 그대로 쓴다
         title = FORM_Q.get(key) or re.sub(r"\*\*|\{name\}님,? ?", "", question.split("\n\n")[-1])
         st.markdown(f"<div class='q'>{title}</div>", unsafe_allow_html=True)
-        text = form_widget(key, quick)
-        err = st.empty()
+        form_widget(key, quick)
+        if error := ss.get("form_error"):
+            st.error(error)
     b = st.columns([1, 3, 1])  # 이전은 왼쪽, 다음은 질문 카드 오른쪽 끝에 맞춘다
-    if ss.fi > 0 and b[0].button("← 이전", width="stretch"):
-        ss.fi -= 1
-        st.rerun()
-    if b[2].button("결과 보기" if ss.fi == n - 1 else "다음 →", type="primary", width="stretch"):
-        if again := intake.take(intake.new_profile(), key, text, PLACES):
-            err.error(again)
-        else:
-            ss.form[key] = text
-            ss.form_raw.update({k: ss[k] for k in ss if k.startswith("f_")})
-            ss.fi += 1
-            st.rerun()
+    if ss.fi > 0:
+        b[0].button("← 이전", width="stretch", key="form_previous", on_click=form_previous)
+    b[2].button("결과 보기" if ss.fi == n - 1 else "다음 →", type="primary", width="stretch",
+                key="form_next", on_click=form_next)
 
 
 def report(p):
@@ -499,9 +545,10 @@ def chat():
     head = st.columns([4, 1], vertical_alignment="center")
     head[0].progress(min(ss.qi, len(intake.QUESTIONS)) / len(intake.QUESTIONS),
                      text=f"질문 {min(ss.qi + 1, len(intake.QUESTIONS))} / {len(intake.QUESTIONS)}" if ss.qi < len(intake.QUESTIONS) else "상담 완료")
-    if head[1].button("처음부터", width="stretch"):
-        del ss.prof
-        st.rerun()
+    def restart():
+        ss.pop("prof", None)
+        ss.qi = 0
+    head[1].button("처음부터", width="stretch", on_click=restart)
     with st.container(height=380, border=True, key="chatbox"):  # AI는 왼쪽, 사용자는 오른쪽 말풍선
         for m in ss.msgs:
             st.chat_message(m["role"], avatar=str(LOGO / "mark.svg") if m["role"] == "assistant" else None).markdown(m["content"])
@@ -526,14 +573,15 @@ def chat():
         key, _, quick = intake.QUESTIONS[ss.qi]
         if key == "place":  # 빠른 답: 공식 목록에 있는 지역
             quick = sorted({g for _, g in PLACES if g})[:6]
+        def submit(widget_key):
+            if text := ss.get(widget_key):
+                answer(text)
         if quick:
-            pick = st.pills("빠른 답", quick, key=f"quick_{ss.qi}_{len(ss.msgs)}", label_visibility="collapsed")
-            if pick:
-                answer(pick)
-                st.rerun()
-        if text := st.chat_input("여기에 답을 적어 주세요 (빠른 답에 없으면 직접 적으셔도 돼요)"):
-            answer(text)
-            st.rerun()
+            widget_key = f"quick_{ss.qi}_{len(ss.msgs)}"
+            st.pills("빠른 답", quick, key=widget_key, label_visibility="collapsed",
+                     on_change=submit, args=(widget_key,))
+        st.chat_input("여기에 답을 적어 주세요 (빠른 답에 없으면 직접 적으셔도 돼요)", key="chat_answer",
+                      on_submit=submit, args=("chat_answer",))
     else:
         report(p)
 
@@ -596,6 +644,7 @@ def home():
         unsafe_allow_html=True)
 
 
+@st.fragment
 def mine():
     """첫 화면: 서비스 이름보다 '어떻게 시작하면 되는지'를 먼저, 첫 질문까지 한 화면에."""
     ss = st.session_state
@@ -622,6 +671,7 @@ def mine():
                       type="primary" if name == picked else "secondary")
 
 
+@st.fragment
 def browse():
     page_head("전체 서비스", "전체 서비스")
     with st.container(border=True):
@@ -649,22 +699,24 @@ def browse():
         st.info("조건에 맞는 서비스가 없어요. 검색어나 필터를 바꿔 보세요.")
 
 
+def apply_weights():
+    st.session_state.W = {k: st.session_state[f"_w_{k}"] for k in score.DEFAULT_WEIGHTS}
+
+
+def reset_weights():
+    st.session_state.W = dict(score.DEFAULT_WEIGHTS)
+    for k, value in score.DEFAULT_WEIGHTS.items():
+        st.session_state[f"_w_{k}"] = float(value)
+
+
 def weights():
     with st.expander("가중치 조절 (팀 결정 전 안)", icon=":material/tune:"):
         c = st.columns(3)
         for i, k in enumerate(score.DEFAULT_WEIGHTS):
             if f"_w_{k}" not in st.session_state:  # 다른 페이지에 다녀와도 값 유지
                 st.session_state[f"_w_{k}"] = float(W[k])
-            c[i % 3].slider(LABELS[k], 0.0, 5.0, step=0.5, key=f"_w_{k}")
-        if st.button("기본값으로"):
-            st.session_state.W = dict(score.DEFAULT_WEIGHTS)
-            for k in score.DEFAULT_WEIGHTS:
-                del st.session_state[f"_w_{k}"]
-            st.rerun()
-        new = {k: st.session_state[f"_w_{k}"] for k in score.DEFAULT_WEIGHTS}
-        if new != W:
-            st.session_state.W = new
-            st.rerun()
+            c[i % 3].slider(LABELS[k], 0.0, 5.0, step=0.5, key=f"_w_{k}", on_change=apply_weights)
+        st.button("기본값으로", on_click=reset_weights)
 
 
 def analysis():
@@ -679,85 +731,90 @@ def analysis():
         st.info("상세 정보를 자동 수집하고 있어요. 저장되는 대로 문턱 점수 분석이 표시됩니다.")
         st.page_link(ALL, label="전체 서비스 보기")
         return
-    t1, t2, t3 = st.tabs(["요약", "점수 상세", "검증"])
-    # 항목 점수도 문턱 점수와 같은 100점 환산으로 맞춘다(원점수와 섞지 않게)
-    scaled = [{k: v * r["score"] / r["raw"] if r["raw"] else 0 for k, v in r["parts"].items()} for r in rows]
-    df = pd.DataFrame([{"점수": r["score"], "구분": r["svc"]["src"], "온라인": r["ext"]["online"],
-                        "구간": band(r["score"])[0], **p} for r, p in zip(rows, scaled)])
-    items = list(rows[0]["parts"])
-    with t1:
-        have = [r for r in rows if r["ai"]]
-        ok = sum(not r["ai"]["needs_review"] for r in have)
-        c = st.columns(4)
-        c[0].metric("분석한 복지서비스", f"{len(df)}건", border=True)
-        c[1].metric("평균 문턱 점수", f"{df['점수'].mean():.0f}점", border=True)
-        c[2].metric("온라인 신청 불가", f"{(~df['온라인']).mean() * 100:.0f}%", border=True)
-        c[3].metric("쉬운 설명 숫자 검사 통과", f"{ok}/{len(have)}", border=True)
-        left, right = st.columns(2)
-        cnt = df["구간"].value_counts()
-        with left.container(border=True):
-            st.markdown("**문턱 점수 분포**")
-            st.markdown(f"<div class='insight'>{len(df)}개 중 <b>{cnt.get('높음', 0)}개</b>가 신청 까다로움(60점 이상), "
-                        f"{cnt.get('낮음', 0)}개가 신청 쉬움(40점 미만)이에요.</div>", unsafe_allow_html=True)
-            st.altair_chart(alt.Chart(df).mark_bar(cornerRadiusTopLeft=4, cornerRadiusTopRight=4).encode(
-                x=alt.X("점수:Q", bin=alt.Bin(step=5), title="문턱 점수"), y=alt.Y("count():Q", title="서비스 수"),
-                color=alt.Color("구간:N", scale=alt.Scale(domain=[b[0] for b in BANDS], range=[b[5] for b in BANDS]),
-                                legend=alt.Legend(orient="top", title=None))).properties(height=260))
-        with right.container(border=True):
-            st.markdown("**무엇이 문턱을 높이나 · 구분별 항목 평균**")
-            avg = df.groupby("구분")[items].mean()
-            st.markdown("<div class='insight'>" + ", ".join(f"{g}은 <b>{avg.loc[g].idxmax()}</b>" for g in avg.index)
-                        + " 항목이 문턱을 가장 많이 올려요.</div>", unsafe_allow_html=True)
-            parts = avg.reset_index().melt("구분", var_name="항목", value_name="평균 점수")
-            st.altair_chart(alt.Chart(parts).mark_bar().encode(
-                x=alt.X("평균 점수:Q", stack="zero", title="평균 문턱 점수(100점 환산)"), y=alt.Y("구분:N", title=None),
-                color=alt.Color("항목:N", legend=alt.Legend(orient="bottom", title=None, columns=3))).properties(height=260))
-    with t2:
-        weights()  # 접어 두고 차트에 폭을 준다
-        with st.container(border=True):
-            st.markdown("**문턱이 높은 서비스 15개 · 항목별 점수**")
-            st.markdown(f"<div class='insight'>조회한 서비스 중 가장 까다로운 곳은 <b>{escape(rows[0]['svc']['servNm'])}</b>({rows[0]['score']}점)이에요. "
-                        "막대 전체 길이가 문턱 점수(100점 환산)예요.</div>", unsafe_allow_html=True)
-            top = pd.DataFrame([{"서비스": r["svc"]["servNm"], "항목": k, "점수": round(v, 1)}
-                                for r, p in zip(rows[:15], scaled[:15]) for k, v in p.items()])
-            st.altair_chart(alt.Chart(top).mark_bar().encode(
-                x=alt.X("sum(점수):Q", title="문턱 점수(100점 환산)", scale=alt.Scale(domain=[0, 100])),
-                y=alt.Y("서비스:N", sort="-x", title=None, axis=alt.Axis(labelLimit=420, labelOverlap=False, labelFontSize=12)),
-                color=alt.Color("항목:N", legend=alt.Legend(orient="bottom", title=None, columns=6)),
-                tooltip=["서비스", "항목", "점수"]).properties(height=520))
-        st.dataframe(pd.DataFrame([{
-            "점수": r["score"], "서비스": r["svc"]["servNm"], "구분": r["svc"]["src"], "지역": r["svc"]["region"],
-            "이유": r["reason"], "온라인": "가능" if r["ext"]["online"] else "불가",
-            "조건 수": len(r["ext"]["conditions"]), "기관 단계": len(r["ext"]["agencies"]),
-            "서류 수": len(r["ext"]["documents"]) if r["ext"].get("documents") else None,
-        } for r in rows]), hide_index=True, width="stretch",
-            column_config={"점수": st.column_config.ProgressColumn("점수", min_value=0, max_value=100, format="%d")})
-    with t3:
-        rule_sum = {r["svc"]["servId"]: evaluate.summarize(r["ext"]) for r in rows}
-        ai_sum = {r["svc"]["servId"]: evaluate.summarize(r["ai"]["extract"]) for r in rows if r["ai"]}
-        # 기존 정답표와 다른 시점의 원문을 비교해 정확도라고 표시하지 않는다.
-        unchanged = {r["svc"]["servId"] for r in rows
-                     if llm.sample_hashes().get(r["svc"]["servId"]) == llm.source_hash(r["svc"])}
-        gold = {key: value for key, value in evaluate.load_gold().items() if key in unchanged}
-        a, b = st.columns(2)
-        with a.container(border=True):
-            st.markdown("**정답표와 비교 (일치율 %)**")
-            if gold:
-                mix = evaluate.gold_mix()
-                st.caption(f"현재 조회 자료와 원문이 같은 정답표 {len(gold)}건만 비교합니다. 기존 정답표 구성: "
-                           f"사람 검수 {mix['사람 검수']}건 · AI 재검토 {mix['AI 재검토']}건 (기준: eval/README.md)")
-                r_cmp, a_cmp = evaluate.compare(rule_sum, gold), evaluate.compare(ai_sum, gold)
-                st.dataframe(pd.DataFrame({"항목": [evaluate.LABELS[f] for f in evaluate.FIELDS],
-                                           "기준표(규칙)": [r_cmp[f] for f in evaluate.FIELDS],
-                                           "AI": [a_cmp[f] for f in evaluate.FIELDS]}), hide_index=True, width="stretch")
-            else:
-                st.info("현재 상세 조회 자료와 원문이 일치하는 정답표가 없습니다. 새 원문의 정답표 검증이 필요합니다. 기준은 `eval/README.md`.")
-        with b.container(border=True):
-            st.markdown("**기준표(규칙)와 AI가 같은 답을 낸 비율** (정답표 전 참고용)")
-            if ai_sum:
-                cmp = evaluate.compare(rule_sum, ai_sum)
-                st.dataframe(pd.DataFrame({"항목": [evaluate.LABELS[f] for f in evaluate.FIELDS],
-                                           "일치율(%)": [cmp[f] for f in evaluate.FIELDS]}), hide_index=True, width="stretch")
+    t1, t2, t3 = st.tabs(["요약", "점수 상세", "검증"], key="analysis_tab", on_change="rerun")
+    if t1.open or t2.open:
+        # 항목 점수도 문턱 점수와 같은 100점 환산으로 맞춘다(원점수와 섞지 않게)
+        scaled = [{k: v * r["score"] / r["raw"] if r["raw"] else 0 for k, v in r["parts"].items()} for r in rows]
+        df = pd.DataFrame([{"점수": r["score"], "구분": r["svc"]["src"], "온라인": r["ext"]["online"],
+                            "구간": band(r["score"])[0], **p} for r, p in zip(rows, scaled)])
+        items = list(rows[0]["parts"])
+    if t1.open:
+        with t1:
+            have = [r for r in rows if r["ai"]]
+            ok = sum(not r["ai"]["needs_review"] for r in have)
+            c = st.columns(4)
+            c[0].metric("분석한 복지서비스", f"{len(df)}건", border=True)
+            c[1].metric("평균 문턱 점수", f"{df['점수'].mean():.0f}점", border=True)
+            c[2].metric("온라인 신청 불가", f"{(~df['온라인']).mean() * 100:.0f}%", border=True)
+            c[3].metric("쉬운 설명 숫자 검사 통과", f"{ok}/{len(have)}", border=True)
+            left, right = st.columns(2)
+            cnt = df["구간"].value_counts()
+            with left.container(border=True):
+                st.markdown("**문턱 점수 분포**")
+                st.markdown(f"<div class='insight'>{len(df)}개 중 <b>{cnt.get('높음', 0)}개</b>가 신청 까다로움(60점 이상), "
+                            f"{cnt.get('낮음', 0)}개가 신청 쉬움(40점 미만)이에요.</div>", unsafe_allow_html=True)
+                histogram = df.groupby(["점수", "구간"], as_index=False).size().rename(columns={"size": "서비스 수"})
+                st.altair_chart(alt.Chart(histogram).mark_bar(cornerRadiusTopLeft=4, cornerRadiusTopRight=4).encode(
+                    x=alt.X("점수:Q", bin=alt.Bin(step=5), title="문턱 점수"), y=alt.Y("sum(서비스 수):Q", title="서비스 수"),
+                    color=alt.Color("구간:N", scale=alt.Scale(domain=[b[0] for b in BANDS], range=[b[5] for b in BANDS]),
+                                    legend=alt.Legend(orient="top", title=None))).properties(height=260))
+            with right.container(border=True):
+                st.markdown("**무엇이 문턱을 높이나 · 구분별 항목 평균**")
+                avg = df.groupby("구분")[items].mean()
+                st.markdown("<div class='insight'>" + ", ".join(f"{g}은 <b>{avg.loc[g].idxmax()}</b>" for g in avg.index)
+                            + " 항목이 문턱을 가장 많이 올려요.</div>", unsafe_allow_html=True)
+                parts = avg.reset_index().melt("구분", var_name="항목", value_name="평균 점수")
+                st.altair_chart(alt.Chart(parts).mark_bar().encode(
+                    x=alt.X("평균 점수:Q", stack="zero", title="평균 문턱 점수(100점 환산)"), y=alt.Y("구분:N", title=None),
+                    color=alt.Color("항목:N", legend=alt.Legend(orient="bottom", title=None, columns=3))).properties(height=260))
+    if t2.open:
+        with t2:
+            weights()  # 접어 두고 차트에 폭을 준다
+            with st.container(border=True):
+                st.markdown("**문턱이 높은 서비스 15개 · 항목별 점수**")
+                st.markdown(f"<div class='insight'>조회한 서비스 중 가장 까다로운 곳은 <b>{escape(rows[0]['svc']['servNm'])}</b>({rows[0]['score']}점)이에요. "
+                            "막대 전체 길이가 문턱 점수(100점 환산)예요.</div>", unsafe_allow_html=True)
+                top = pd.DataFrame([{"서비스": r["svc"]["servNm"], "항목": k, "점수": round(v, 1)}
+                                    for r, p in zip(rows[:15], scaled[:15]) for k, v in p.items()])
+                st.altair_chart(alt.Chart(top).mark_bar().encode(
+                    x=alt.X("sum(점수):Q", title="문턱 점수(100점 환산)", scale=alt.Scale(domain=[0, 100])),
+                    y=alt.Y("서비스:N", sort="-x", title=None, axis=alt.Axis(labelLimit=420, labelOverlap=False, labelFontSize=12)),
+                    color=alt.Color("항목:N", legend=alt.Legend(orient="bottom", title=None, columns=6)),
+                    tooltip=["서비스", "항목", "점수"]).properties(height=520))
+            st.dataframe(pd.DataFrame([{
+                "점수": r["score"], "서비스": r["svc"]["servNm"], "구분": r["svc"]["src"], "지역": r["svc"]["region"],
+                "이유": r["reason"], "온라인": "가능" if r["ext"]["online"] else "불가",
+                "조건 수": len(r["ext"]["conditions"]), "기관 단계": len(r["ext"]["agencies"]),
+                "서류 수": len(r["ext"]["documents"]) if r["ext"].get("documents") else None,
+            } for r in rows]), hide_index=True, width="stretch",
+                column_config={"점수": st.column_config.ProgressColumn("점수", min_value=0, max_value=100, format="%d")})
+    if t3.open:
+        with t3:
+            rule_sum = {r["svc"]["servId"]: evaluate.summarize(r["ext"]) for r in rows}
+            ai_sum = {r["svc"]["servId"]: evaluate.summarize(r["ai"]["extract"]) for r in rows if r["ai"]}
+            # 기존 정답표와 다른 시점의 원문을 비교해 정확도라고 표시하지 않는다.
+            unchanged = {r["svc"]["servId"] for r in rows
+                         if llm.sample_hashes().get(r["svc"]["servId"]) == llm.source_hash(r["svc"])}
+            gold = {key: value for key, value in evaluate.load_gold().items() if key in unchanged}
+            a, b = st.columns(2)
+            with a.container(border=True):
+                st.markdown("**정답표와 비교 (일치율 %)**")
+                if gold:
+                    mix = evaluate.gold_mix()
+                    st.caption(f"현재 조회 자료와 원문이 같은 정답표 {len(gold)}건만 비교합니다. 기존 정답표 구성: "
+                               f"사람 검수 {mix['사람 검수']}건 · AI 재검토 {mix['AI 재검토']}건 (기준: eval/README.md)")
+                    r_cmp, a_cmp = evaluate.compare(rule_sum, gold), evaluate.compare(ai_sum, gold)
+                    st.dataframe(pd.DataFrame({"항목": [evaluate.LABELS[f] for f in evaluate.FIELDS],
+                                               "기준표(규칙)": [r_cmp[f] for f in evaluate.FIELDS],
+                                               "AI": [a_cmp[f] for f in evaluate.FIELDS]}), hide_index=True, width="stretch")
+                else:
+                    st.info("현재 상세 조회 자료와 원문이 일치하는 정답표가 없습니다. 새 원문의 정답표 검증이 필요합니다. 기준은 `eval/README.md`.")
+            with b.container(border=True):
+                st.markdown("**기준표(규칙)와 AI가 같은 답을 낸 비율** (정답표 전 참고용)")
+                if ai_sum:
+                    cmp = evaluate.compare(rule_sum, ai_sum)
+                    st.dataframe(pd.DataFrame({"항목": [evaluate.LABELS[f] for f in evaluate.FIELDS],
+                                               "일치율(%)": [cmp[f] for f in evaluate.FIELDS]}), hide_index=True, width="stretch")
 
 
 def guide():
