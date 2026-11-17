@@ -23,8 +23,8 @@ from pipeline import build
 import llm
 from parse import load_all
 from welfare_api import APIError, DataClient, QuotaExceeded, WelfareAPI, api_keys
-from welfare_store import StoreError, WelfareStore, key_id, today
-from welfare_sync import sync
+from welfare_store import StoreError, WelfareStore, key_id, sync_slot, today
+from welfare_sync import main, sync
 from test_welfare_api import listing, detail_xml
 
 
@@ -152,7 +152,6 @@ class TestMongoSync(unittest.TestCase):
                 patch.object(DataClient, "detail", autospec=True, side_effect=detail) as dtl:
             sync("mongodb://test", self.keys)
             self.assertEqual((cat.call_count, dtl.call_count), (2, 1))
-            self.assertFalse(self.store.needs_sync(self.keys))
             sync("mongodb://test", self.keys)
             self.assertEqual((cat.call_count, dtl.call_count), (2, 1))
             self.store.db.meta.update_one({"_id": "sync"}, {"$set": {
@@ -219,12 +218,12 @@ class TestMongoSync(unittest.TestCase):
 
     def test_pending_detail_does_not_spend_an_extra_call(self):
         self.publish([self.local])
-        api = WelfareAPI("mongodb://test", self.keys)
-        with patch.object(api, "start_refresh") as refresh, patch("welfare_api.urllib.request.urlopen") as req:
+        api = WelfareAPI("mongodb://test")
+        with patch("welfare_api.urllib.request.urlopen") as req, patch("welfare_sync.sync") as refresh:
             with self.assertRaisesRegex(APIError, "자동 수집 대기"):
                 api.detail(self.local)
             req.assert_not_called()
-            refresh.assert_called_once()
+            refresh.assert_not_called()
         self.assertIsNone(build(services=[self.local])[0]["score"])
 
     def test_wrong_detail_and_malformed_xml_are_rejected(self):
@@ -258,8 +257,8 @@ class TestMongoSync(unittest.TestCase):
 
     def test_unchanged_revision_reuses_database_snapshot(self):
         self.publish([self.local])
-        api = WelfareAPI("mongodb://test", self.keys)
-        with patch.object(api, "start_refresh"), patch.object(WelfareStore, "snapshot", autospec=True,
+        api = WelfareAPI("mongodb://test")
+        with patch.object(WelfareStore, "snapshot", autospec=True,
                 side_effect=WelfareStore.snapshot) as snapshot:
             api.catalog()
             api.catalog()
@@ -267,6 +266,82 @@ class TestMongoSync(unittest.TestCase):
             self.save(self.local)
             api.catalog()
             self.assertEqual(snapshot.call_count, 2)
+
+    def test_four_schedules_use_korean_time(self):
+        midnight = datetime(2026, 11, 17, 15, tzinfo=timezone.utc).timestamp()
+        self.assertEqual(sync_slot(midnight - 1), "2026-11-17T18")
+        for hour in (0, 6, 12, 18):
+            self.assertEqual(sync_slot(midnight + hour * 3600), f"2026-11-18T{hour:02d}")
+            self.assertEqual(sync_slot(midnight + (hour + 6) * 3600 - 1), f"2026-11-18T{hour:02d}")
+
+    def test_four_runs_compare_lists_and_share_the_same_daily_budget(self):
+        def catalog(client, source):
+            self.assertIsNotNone(client.store.reserve_key(source, client.keys))
+            return [self.local] if source == "local" else []
+        def detail(client, item):
+            self.assertIsNotNone(client.store.reserve_key(item["api_source"], client.keys))
+            return merge_detail(item, detail_xml())
+        with patch.object(DataClient, "catalog", autospec=True, side_effect=catalog) as cat, \
+                patch.object(DataClient, "detail", autospec=True, side_effect=detail) as dtl:
+            for hour in (0, 6, 12, 18):
+                with patch("welfare_sync.sync_slot", return_value=f"{today()}T{hour:02d}"):
+                    sync("mongodb://test", self.keys)
+                    sync("mongodb://test", self.keys)  # 같은 구간 수동 재실행
+            self.assertEqual(cat.call_count, 8)
+            self.assertEqual(dtl.call_count, 1)
+        self.assertEqual(self.store.remaining("central", self.keys), 296)
+        self.assertEqual(self.store.remaining("local", self.keys), 2995)
+
+    def test_next_schedule_does_not_call_api_with_exhausted_daily_budget(self):
+        self.publish([self.local])
+        self.save(self.local)
+        self.store.release("test-owner")
+        for source in ("central", "local"):
+            for key in self.keys:
+                _, day = self.store.reserve_key(source, [key])
+                self.store.block_key(source, key, day)
+        with patch("welfare_sync.sync_slot", return_value="next-slot"), \
+                patch("welfare_api.urllib.request.urlopen") as req:
+            result = sync("mongodb://test", self.keys)
+        req.assert_not_called()
+        self.assertEqual(result["saved"], {"central": 0, "local": 0})
+        self.assertTrue(self.store.service("local", "L1")["detail_loaded"])
+        self.assertTrue(all(s["status"] == "quota" for s in result["progress"]["sources"].values()))
+
+    def test_web_reads_do_not_initialize_write_or_query_sync_progress(self):
+        self.publish([self.local, *items(["L2"])])
+        self.save(self.local)
+        with patch.object(WelfareStore, "initialize") as initialize, \
+                patch.object(WelfareStore, "progress") as progress, \
+                patch.object(WelfareStore, "quota") as quota, \
+                patch("welfare_sync.sync") as refresh, patch("welfare_api.urllib.request.urlopen") as request:
+            api = WelfareAPI("mongodb://test")
+            snapshot = api.catalog()
+            api.catalog()
+            api.detail(self.local)
+        self.assertEqual(snapshot["sync"]["sources"]["local"]["ready"], 1)
+        self.assertEqual(snapshot["sync"]["sources"]["local"]["total"], 2)
+        for mock in (initialize, progress, quota, refresh, request):
+            mock.assert_not_called()
+
+    def test_scheduled_command_reports_incomplete_work_as_failure(self):
+        for status, expected in (("complete", 0), ("quota", 0), ("error", 1), ("waiting", 1), ("collecting", 1)):
+            result = {"status": "finished", "saved": {"central": 0, "local": 0}, "progress": {"sources": {
+                s: {"total": 1, "ready": 0, "remaining_calls": 0, "status": status}
+                for s in ("central", "local")}}}
+            with self.subTest(status=status), patch.dict(os.environ, {"MONGODB_URI": "mongodb://test"}), \
+                    patch("welfare_sync.api_keys", return_value=self.keys), patch("welfare_sync.sync", return_value=result), \
+                    patch("sys.stdout", new=io.StringIO()):
+                self.assertEqual(main(["--seconds", "5400"]), expected)
+
+    def test_scheduled_command_does_not_print_sensitive_exception_details(self):
+        output = io.StringIO()
+        with patch.dict(os.environ, {"MONGODB_URI": "mongodb://test"}), \
+                patch("welfare_sync.api_keys", return_value=self.keys), \
+                patch("welfare_sync.sync", side_effect=RuntimeError("private-password")), \
+                patch("sys.stdout", new=output):
+            self.assertEqual(main([]), 1)
+        self.assertNotIn("private-password", output.getvalue())
 
     def test_database_error_is_redacted(self):
         with self.assertRaises(StoreError) as caught:
