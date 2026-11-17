@@ -4,7 +4,7 @@
 
 > **진행 상태: 공식 복지 API 연동 · Vercel 운영 (11/17)**
 > 고정 샘플 50건 대신 중앙부처·지자체 API의 전체 목록을 불러옵니다. 2026-11-17 연결 확인 시 중앙 461건 + 지자체 4,828건, 총 5,289건이며 실제 건수는 갱신에 따라 달라집니다.
-> `#23`의 Streamlit 화면 구성과 문턱 점수 계산식을 바탕으로, 공식 API와 MongoDB 영구 저장·일일 자동 갱신을 연결했습니다. 가중치, 팀원 역할, 정답표 검증은 아직 확정하지 않았습니다. [서비스 열기](https://bokji-munteok.vercel.app/)
+> `#23`의 Streamlit 화면 구성과 문턱 점수 계산식을 바탕으로, 공식 API와 MongoDB 영구 저장·하루 네 번 자동 갱신을 연결했습니다. 가중치, 팀원 역할, 정답표 검증은 아직 확정하지 않았습니다. [서비스 열기](https://bokji-munteok.vercel.app/)
 
 ## 목차
 
@@ -174,7 +174,7 @@ AI 예측이 아니라 정해진 항목을 더하는 방식이라, 점수마다 
     </tr>
     <tr>
       <td nowrap>김도형</td>
-      <td>발표자료(PPT), 배포(vercel cloud)</td>
+      <td>발표자료(PPT), API 연동, DB 연동(MongoDB), 배포(Vercel Cloud)</td>
       <td><a href="https://github.com/kdh0381">kdh0381</a></td>
     </tr>
   </tbody>
