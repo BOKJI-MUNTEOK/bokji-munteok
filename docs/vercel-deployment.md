@@ -7,17 +7,15 @@
 운영 주소: [복지문턱](https://bokji-munteok.vercel.app/) · [내 복지 찾기](https://bokji-munteok.vercel.app/find)
 
 `kdh0381/bokji-munteok` 프로젝트에 기존 앱을 배포했습니다.
-이제 GitHub Actions 워크플로로 `main` 변경을 자동 배포하도록 구성합니다.
+GitHub Actions 워크플로로 `main` 변경을 자동 배포합니다.
 배포용 `VERCEL_TOKEN`을 저장소 Actions Secret에 등록하고, 기존 Vercel 프로젝트 접근 권한을 확인했습니다.
-워크플로가 포함된 PR을 `main`에 병합하면 첫 자동 배포가 실행됩니다.
-이번 설정 작업에서는 운영 배포를 실행하지 않습니다.
+`main`에 PR을 병합하면 기존 테스트를 통과한 뒤 운영 배포가 실행됩니다.
 
 기존 Streamlit 주소: https://bokji-munteok.streamlit.app
 
 ## 자동 배포 설정
 
 2026-11-17 인증 키 등록과 워크플로 정적 검사를 완료했습니다.
-사용자 요청에 따라 `main` 병합과 실제 자동 배포 실행은 보류한 상태입니다.
 아래 1~2번은 새로 연결하거나 인증 키를 교체할 때 사용하는 절차입니다.
 
 현재 Vercel Hobby 팀은 GitHub 조직 저장소를 직접 연결할 수 없어,
