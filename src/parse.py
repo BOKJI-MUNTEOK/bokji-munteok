@@ -1,5 +1,7 @@
 """복지서비스 API 상세 XML(중앙·지자체)을 같은 모양의 dict로 바꾼다."""
 import html
+import hashlib
+import json
 import re
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -120,6 +122,9 @@ def parse_list_item(item: ET.Element, source: str) -> dict:
         online_flag={"Y": True, "N": False}.get(_t(item, "onapPsbltYn")),
         last_modified=_t(item, "lastModYmd"),
     )
+    # 조회수는 방문할 때마다 변하므로 제외하고 나머지 원본 목록 필드는 모두 비교한다.
+    stable = sorted((child.tag, clean(child.text)) for child in item if child.tag != "inqNum")
+    d["list_hash"] = hashlib.sha256(json.dumps(stable, ensure_ascii=False).encode()).hexdigest()
     return d
 
 

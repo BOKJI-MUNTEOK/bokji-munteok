@@ -1,199 +1,198 @@
-"""복지로 공식 API: 전체 목록 페이지 조회, 필요할 때 상세 조회, 서버 캐시.
-
-인증 키와 요청 URL은 로그·캐시에 남기지 않는다. 실패 시 샘플로 대체하지 않는다.
-"""
-import hashlib
-import json
+"""공식 복지 API 요청과 DB 기반 화면 데이터. 키·요청 URL은 출력하지 않는다."""
 import os
+import logging
 import re
-import tempfile
 import threading
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
-from pathlib import Path
 
 from env import load_env
 from parse import merge_detail, parse_list_item
+from welfare_store import WelfareStore
 
 ENDPOINTS = {
     "central": ("NationalWelfareInformationsV001", "NationalWelfarelistV001", "NationalWelfaredetailedV001"),
     "local": ("LocalGovernmentWelfareInformations", "LcgvWelfarelist", "LcgvWelfaredetailed"),
 }
 LABELS = {"central": "중앙부처", "local": "지자체"}
-LIST_TTL = 6 * 60 * 60
-DETAIL_TTL = 24 * 60 * 60
-STALE_TTL = 7 * 24 * 60 * 60
 
 
 class APIError(RuntimeError):
-    """키와 요청 주소를 포함하지 않는 사용자용 오류."""
+    pass
 
 
-class WelfareAPI:
-    def __init__(self, key=None, cache_dir=None):
-        load_env()
-        self.key = urllib.parse.unquote(key if key is not None else os.environ.get("DATA_GO_KR_KEY", "")).strip()
-        self.cache_dir = Path(cache_dir or Path(tempfile.gettempdir()) / "bokji-welfare-api-v1")
-        self.lock = threading.RLock()
-        self.cooldown = {}  # 인증·호출량 오류 때 반복 클릭으로 API를 계속 부르지 않는다.
+class QuotaExceeded(APIError):
+    pass
 
-    def _request(self, source, detail=False, **params):
-        if not self.key:
-            raise APIError("복지 데이터 인증 키가 설정되지 않았어요. 운영자는 DATA_GO_KR_KEY 설정을 확인해 주세요.")
-        if source in self.cooldown:
-            until, message = self.cooldown[source]
-            if time.time() < until:
-                raise APIError(message)
+
+def api_keys():
+    load_env()
+    values = [urllib.parse.unquote(os.environ.get(name, "")).strip()
+              for name in ("DATA_GO_KR_KEY", "DATA_GO_KR_KEY_2", "DATA_GO_KR_KEY_3")]
+    return list(dict.fromkeys(key for key in values if key))
+
+
+class RequestGate:
+    """하나의 갱신 작업이 초당 요청을 몰아서 보내지 않도록 간격을 둔다."""
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.last = 0.0
+
+    def wait(self):
+        with self.lock:
+            time.sleep(max(0, .2 - (time.monotonic() - self.last)))
+            self.last = time.monotonic()
+
+
+class DataClient:
+    def __init__(self, store, keys, gate=None, owner=None):
+        self.store, self.keys, self.gate = store, keys, gate or RequestGate()
+        self.owner = owner
+
+    def request(self, source, detail=False, **params):
+        if not self.keys:
+            raise APIError("공공데이터 인증 키가 설정되지 않았어요.")
         base, listing, detailed = ENDPOINTS[source]
         if source == "central":
             params["callTp"] = "D" if detail else "L"
             if not detail:
                 params["srchKeyCode"] = "003"
-        query = urllib.parse.urlencode({"serviceKey": self.key, **params})
-        url = f"https://apis.data.go.kr/B554287/{base}/{detailed if detail else listing}?{query}"
         label = LABELS[source]
-        for attempt in range(3):
+        attempts = 0
+        for _ in range(len(self.keys) + 3):
+            self.gate.wait()
+            if self.owner:
+                self.store.renew(self.owner)
+            reserved = self.store.reserve_key(source, self.keys)
+            if reserved is None:
+                raise QuotaExceeded(f"{label}의 오늘 사용 가능한 호출량을 모두 사용했습니다. 다음날 접속하면 이어서 수집합니다.")
+            key, day = reserved
+            query = urllib.parse.urlencode({"serviceKey": key, **params})
+            url = f"https://apis.data.go.kr/B554287/{base}/{detailed if detail else listing}?{query}"
+            attempts += 1
             try:
                 with urllib.request.urlopen(url, timeout=15) as response:
                     data = response.read()
             except urllib.error.HTTPError as exc:
+                status = exc.code
                 exc.close()
-                if exc.code in (401, 403, 429):
-                    message = f"{label} API 인증 또는 호출 한도를 확인해 주세요. 잠시 후 다시 시도할 수 있어요."
-                    self.cooldown[source] = (time.time() + 300, message)
-                    raise APIError(message) from None
-                if exc.code < 500:
-                    raise APIError(f"{label} API가 요청을 처리하지 못했어요 (HTTP {exc.code}).") from None
-                data = None
+                if status in (401, 403):
+                    self.store.block_key(source, key, day)
+                    continue
+                if status == 429 or status >= 500:
+                    if attempts < 3:
+                        time.sleep(attempts)
+                        continue
+                raise APIError(f"{label} API 연결 오류(HTTP {status}). 저장된 자료는 유지합니다.") from None
             except (urllib.error.URLError, TimeoutError, OSError):
-                data = None
-            if data is not None:
-                break
-            if attempt == 2:
-                raise APIError(f"{label} API에 연결하지 못했어요. 잠시 후 다시 시도해 주세요.") from None
-            time.sleep(0.5 * (attempt + 1))
-        try:
-            root = ET.fromstring(data)
-        except ET.ParseError:
-            raise APIError(f"{label} API 응답을 읽지 못했어요. 잠시 후 다시 시도해 주세요.") from None
-        code = root.findtext(".//returnReasonCode") or root.findtext(".//resultCode")
-        portal_error = root.findtext(".//errMsg") or root.findtext(".//returnAuthMsg")
-        if portal_error or code not in ("0", "00"):
-            # API의 원문 오류에는 요청 URL/인증 키가 포함될 수 있어 그대로 출력하지 않는다.
-            safe_code = code if code and re.fullmatch(r"[A-Za-z0-9_]{1,30}", code) else "UNKNOWN"
-            message = f"{label} API 오류({safe_code}). 인증·활용 신청 상태와 호출 한도를 확인해 주세요."
-            self.cooldown[source] = (time.time() + 300, message)
-            raise APIError(message)
-        return root
-
-    def _read(self, name, max_age):
-        try:
-            value = json.loads((self.cache_dir / f"{name}.json").read_text(encoding="utf-8"))
-            expected = list if name.startswith("catalog-") else dict
-            if not isinstance(value, dict) or not isinstance(value.get("data"), expected):
-                return None
-            if 0 <= time.time() - value["fetched_at"] < max_age:
-                return value
-        except (OSError, ValueError, KeyError, TypeError):
-            pass
-        return None
-
-    def _write(self, name, data):
-        value = {"fetched_at": time.time(), "data": data}
-        try:
-            self.cache_dir.mkdir(parents=True, exist_ok=True)
-            with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=self.cache_dir, delete=False) as f:
-                json.dump(value, f, ensure_ascii=False)
-                temp_path = Path(f.name)
+                if attempts < 3:
+                    time.sleep(attempts)
+                    continue
+                raise APIError(f"{label} API에 연결하지 못했습니다. 잠시 후 자동으로 다시 시도합니다.") from None
             try:
-                os.replace(temp_path, self.cache_dir / f"{name}.json")
-            finally:
-                temp_path.unlink(missing_ok=True)
-        except OSError:
-            # 읽기 전용 환경이어도 현재 요청의 정상 응답은 쓸 수 있다.
-            pass
-        return value
+                root = ET.fromstring(data)
+            except ET.ParseError:
+                raise APIError(f"{label} API 응답을 읽지 못했습니다.") from None
+            code = root.findtext(".//returnReasonCode") or root.findtext(".//resultCode")
+            portal_error = root.findtext(".//errMsg") or root.findtext(".//returnAuthMsg")
+            if code in ("20", "21", "22", "30", "31", "32"):
+                self.store.block_key(source, key, day)
+                continue
+            if code == "23" and attempts < 3:
+                time.sleep(attempts * 2)
+                continue
+            if portal_error or code not in ("0", "00"):
+                safe_code = code if code and re.fullmatch(r"[A-Za-z0-9_]{1,30}", code) else "UNKNOWN"
+                raise APIError(f"{label} API 오류({safe_code}). 잠시 후 자동으로 다시 확인합니다.")
+            return root
+        raise APIError(f"{label} API의 인증 또는 호출 한도를 확인해 주세요.")
 
-    def _catalog_source(self, source):
-        rows = {}
-        total = None
+    def catalog(self, source):
+        rows, total = {}, None
         for page in range(1, 1001):
-            root = self._request(source, pageNo=page, numOfRows=500)
+            root = self.request(source, pageNo=page, numOfRows=500)
             try:
                 count = int(root.findtext("totalCount"))
-                returned_page = int(root.findtext("pageNo"))
-                if count < 0 or returned_page != page or (total is not None and total != count):
+                if count < 0 or int(root.findtext("pageNo")) != page or (total is not None and total != count):
                     raise ValueError
             except (ValueError, TypeError):
-                raise APIError(f"{LABELS[source]} 목록이 변경되었거나 페이지 정보가 올바르지 않아요. 다시 시도해 주세요.") from None
-            total = count
-            previous = len(rows)
+                raise APIError(f"{LABELS[source]} 목록이 변경되었거나 페이지 정보가 올바르지 않습니다.") from None
+            total, previous = count, len(rows)
             for element in root.iter("servList"):
                 item = parse_list_item(element, source)
                 if not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", item["servId"]) or not item["servNm"]:
-                    raise APIError(f"{LABELS[source]} 목록에 서비스 식별 정보가 없어요.")
+                    raise APIError(f"{LABELS[source]} 목록에 서비스 식별 정보가 없습니다.")
                 rows[item["servId"]] = item
             if len(rows) == total:
                 return list(rows.values())
             if len(rows) <= previous or len(rows) > total:
                 break
-        raise APIError(f"{LABELS[source]} 전체 목록을 받지 못했어요. 일부 목록으로 대체하지 않고 다시 시도합니다.")
-
-    def catalog(self):
-        """양쪽 API의 모든 페이지. 오류 때는 7일 이내 마지막 성공본과 경고를 돌려준다."""
-        with self.lock:
-            sources, warnings = {}, []
-            for source in ENDPOINTS:
-                name = f"catalog-{source}"
-                cached = self._read(name, LIST_TTL)
-                if cached is None:
-                    try:
-                        cached = self._write(name, self._catalog_source(source))
-                    except APIError as exc:
-                        cached = self._read(name, STALE_TTL)
-                        if cached is None:
-                            raise
-                        warnings.append(f"{LABELS[source]} 목록 갱신 실패: 마지막 조회 자료를 표시합니다. {exc}")
-                sources[source] = cached
-            return {"services": [s for cached in sources.values() for s in cached["data"]],
-                    "updated_at": min(c["fetched_at"] for c in sources.values()),
-                    "counts": {source: len(c["data"]) for source, c in sources.items()},
-                    "warnings": warnings}
-
-    def _detail_name(self, item):
-        # API ID를 경로로 직접 쓰지 않아 외부 응답에 경로 문자가 있어도 안전하다.
-        digest = hashlib.sha256(f"{item['api_source']}:{item['servId']}".encode()).hexdigest()
-        return f"detail-{digest}"
-
-    def cached_detail(self, item, max_age=DETAIL_TTL):
-        cached = self._read(self._detail_name(item), max_age)
-        if cached and cached["data"].get("last_modified") == item.get("last_modified"):
-            return {**cached["data"], **{k: item[k] for k in (
-                "life", "groups", "themes", "region", "sido", "sgg", "link", "online_flag")},
-                "detail_fetched_at": cached["fetched_at"]}
-        return None
+        raise APIError(f"{LABELS[source]} 전체 목록을 받지 못했습니다. 저장된 목록을 유지합니다.")
 
     def detail(self, item):
-        with self.lock:
-            cached = self.cached_detail(item)
-            if cached:
-                return cached
-            try:
-                root = self._request(item["api_source"], detail=True, servId=item["servId"])
-                if root.findtext("servId") != item["servId"] or not root.findtext("servNm"):
-                    raise APIError("요청한 서비스와 상세 응답이 일치하지 않아요. 잠시 후 다시 시도해 주세요.")
-                svc = merge_detail(item, root)
-                saved = self._write(self._detail_name(item), svc)
-                return {**svc, "detail_fetched_at": saved["fetched_at"]}
-            except APIError as exc:
-                cached = self.cached_detail(item, STALE_TTL)
-                if cached:
-                    return {**cached, "detail_warning": f"상세 정보 갱신 실패: 마지막 조회 자료를 표시합니다. {exc}"}
-                raise
+        root = self.request(item["api_source"], detail=True, servId=item["servId"])
+        if root.findtext("servId") != item["servId"] or not root.findtext("servNm"):
+            raise APIError("요청한 서비스와 상세 응답이 일치하지 않습니다.")
+        return merge_detail(item, root)
+
+
+class WelfareAPI:
+    """Streamlit/명령줄 공통 진입점. 첫 접속의 갱신과 화면 읽기를 분리한다."""
+    def __init__(self, database_url=None, keys=None):
+        load_env()
+        self.database_url = database_url or os.environ.get("MONGODB_URI", "")
+        self.keys = api_keys() if keys is None else list(dict.fromkeys(keys))
+        self.thread = None
+        self.thread_lock = threading.Lock()
+        self.snapshot_lock = threading.Lock()
+        self.snapshot_cache = None
+        with WelfareStore(self.database_url) as store:
+            store.initialize()
+
+    def start_refresh(self):
+        from welfare_sync import sync
+        with self.thread_lock:
+            if self.thread and self.thread.is_alive():
+                return
+            with WelfareStore(self.database_url) as store:
+                if not store.needs_sync(self.keys):
+                    return
+
+            def run():
+                try:
+                    sync(self.database_url, self.keys, max_seconds=210)
+                except Exception as exc:
+                    # 예외 본문에는 접속 정보가 포함될 수 있으므로 종류만 기록한다.
+                    logging.getLogger(__name__).warning("복지 자동 갱신 중단: %s", type(exc).__name__)
+
+            self.thread = threading.Thread(target=run, daemon=True, name="welfare-sync")
+            self.thread.start()
+
+    def catalog(self):
+        self.start_refresh()
+        with self.snapshot_lock, WelfareStore(self.database_url) as store:
+            revision = store.revision()
+            if self.snapshot_cache is None or self.snapshot_cache["sync"]["revision"] != revision:
+                self.snapshot_cache = store.snapshot(self.keys)
+            return self.snapshot_cache
+
+    def refresh_status(self):
+        self.start_refresh()
+        with WelfareStore(self.database_url) as store:
+            return store.progress(self.keys)
 
     def services(self, catalog):
-        """이미 조회한 상세만 합친다. 모든 서비스의 상세를 무작정 호출하지 않는다."""
-        return [self.cached_detail(item) or item for item in catalog["services"]]
+        return catalog["services"]
+
+    def detail(self, item):
+        with WelfareStore(self.database_url) as store:
+            service = store.service(item["api_source"], item["servId"])
+        if service is None:
+            raise APIError("공식 목록에서 삭제된 서비스입니다.")
+        if not service.get("detail_loaded"):
+            self.start_refresh()
+            raise APIError("이 서비스의 상세는 자동 수집 대기 중입니다. 저장이 끝나면 신청 안내와 점수가 표시됩니다.")
+        return service

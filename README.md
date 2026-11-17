@@ -4,7 +4,7 @@
 
 > **진행 상태: 공식 복지 API 연동 · Vercel 운영 (11/17)**
 > 고정 샘플 50건 대신 중앙부처·지자체 API의 전체 목록을 불러옵니다. 2026-11-17 연결 확인 시 중앙 461건 + 지자체 4,828건, 총 5,289건이며 실제 건수는 갱신에 따라 달라집니다.
-> `#23`의 Streamlit 화면 구성과 문턱 점수 계산식을 바탕으로, 목록 조회·상세 조회·캐시를 연결했습니다. 가중치, 팀원 역할, 정답표 검증은 아직 확정하지 않았습니다. [서비스 열기](https://bokji-munteok.vercel.app/)
+> `#23`의 Streamlit 화면 구성과 문턱 점수 계산식을 바탕으로, 공식 API와 MongoDB 영구 저장·일일 자동 갱신을 연결했습니다. 가중치, 팀원 역할, 정답표 검증은 아직 확정하지 않았습니다. [서비스 열기](https://bokji-munteok.vercel.app/)
 
 ## 목차
 
@@ -61,18 +61,22 @@
     </tr>
     <tr>
       <td nowrap>상세 조회</td>
-      <td>서비스의 ‘신청 방법 보기’를 누를 때 지원대상·선정기준·지원내용·신청방법·첨부 서식을 조회하고 기존 규칙으로 문턱 점수 계산</td>
+      <td>미수집·변경된 서비스의 지원대상·선정기준·지원내용·신청방법·첨부 서식을 자동 수집하고 기존 규칙의 분석 결과를 MongoDB에 저장</td>
     </tr>
     <tr>
       <td nowrap>갱신 기준</td>
-      <td>목록 캐시 6시간, 상세 캐시 24시간. 만료 후 다음 조회 때 갱신하며 조회 시각과 실제 건수를 화면에 표시</td>
+      <td>한국시간 기준 그날 첫 접속 때 전체 목록 비교. 추가·변경·삭제를 반영하고 미수집 상세를 이어받으며 저장 건수·갱신 상태를 표시</td>
     </tr>
   </tbody>
 </table>
 
 조회한 목록 전체에서 검색·지역·대상 필터를 적용하고, 화면에는 24건씩 나눠 보여 줍니다. 상세를 받기 전에는 **‘상세 확인 전’**으로 표시하고 점수를 만들지 않습니다. 신청 난이도 필터·점수 정렬·분석 통계는 **상세 조회가 끝난 서비스만** 기준으로 하며, 전체 서비스의 난이도 순위·통계를 의미하지 않습니다. 태그로 찾은 서비스도 세부 지원 조건은 상세 안내와 담당 기관에서 확인해야 합니다.
 
-API 인증·호출 한도·통신 오류가 나면 안내를 표시합니다. 갱신 실패 시 7일 이내의 마지막 정상 API 응답이 있으면 조회 시각과 경고를 함께 표시하며, 샘플 50건으로 대체하지 않습니다. 캐시는 서버 인스턴스의 임시 저장소에 있어 재시작·재배포 시 다시 조회합니다.
+목록·상세·규칙 분석 결과·호출 사용량·진행 상태를 MongoDB Atlas에 저장하므로 서버 재시작·재배포 후에도 유지합니다. 웹 접속이 자동 갱신을 시작하며, 열어 둔 화면은 30초마다 진행 상태를 확인합니다. 실행이 중단되면 다음 접속에서 이어받습니다. 접속이 없으면 예약 실행하지 않습니다. 오류가 나도 마지막 정상 자료를 유지하고 조회 시각과 안내를 표시하며 샘플로 대체하지 않습니다.
+
+세 개의 서로 다른 승인 키를 기준으로 **중앙 하루 최대 300회·지자체 3,000회**를 사용합니다. 목록·상세·재시도 모두 이 예산에 포함되므로 하루 상세 분석 건수는 이보다 적을 수 있습니다. 각 키의 기본 한도는 중앙 100회·지자체 1,000회이며 제공기관이 먼저 한도 오류를 반환하면 해당 키는 그날 사용을 중단합니다. 여러 방문자·서버의 호출량과 갱신 잠금은 DB에서 공유합니다.
+
+다음날에는 전체 목록을 다시 비교한 뒤 **새 항목·목록 정보가 변경된 항목·아직 받지 못한 상세만** 호출합니다. 목록이 같으면 기존 상세와 분석을 재사용합니다. 조회수는 변경 비교에서 제외합니다. 전체 페이지가 정상 수신된 경우에만 삭제된 서비스를 화면에서 제외합니다. 지자체는 `lastModYmd`도 비교하지만, **중앙 목록에는 상세 수정일이 없어 목록에 드러나지 않는 본문 변경까지 자동 감지할 수는 없습니다.**
 
 구비서류만 따로 적힌 필드가 없어 신청방법 본문에서 확인되는 서류를 사용하고, 없는 서비스는 ‘서류 정보 없음’으로 표시합니다. 기존 2026-11-10 샘플 50건과 정답표는 테스트·원문 대조용으로 보관합니다. 해당 샘플의 지자체 9/25건·중앙 2/25건에 서류 안내가 있었으며, 이 비율은 현재 전체 API 자료의 통계가 아닙니다.
 
@@ -193,11 +197,13 @@ AI 예측이 아니라 정해진 항목을 더하는 방식이라, 점수마다 
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 cp .env.example .env
-# .env의 DATA_GO_KR_KEY에 공공데이터포털 인증 키 입력
+# .env에 DATA_GO_KR_KEY와 MONGODB_URI 입력
 .venv/bin/python -m streamlit run app.py
 ```
 
 공공데이터포털에서 **중앙부처복지서비스와 지자체복지서비스를 각각 활용 신청**한 뒤 `DATA_GO_KR_KEY`를 설정합니다. Encoding/Decoding 키 모두 사용할 수 있습니다. 운영 화면은 이 키로 실제 API를 조회하며 키가 없을 때 샘플 화면으로 돌아가지 않습니다. `.env`는 Git·Vercel 업로드·Docker 빌드에서 제외합니다.
+
+`MONGODB_URI`에는 Atlas의 앱 전용 연결 문자열을, `MONGODB_DATABASE`에는 `bokji_munteok`을 설정합니다. 팀원의 추가 승인 키는 `DATA_GO_KR_KEY_2`, `DATA_GO_KR_KEY_3`에 설정합니다. 같은 키를 중복 입력해도 호출 한도는 늘어나지 않습니다.
 
 `LLM_API_KEY`는 쉬운 설명을 새로 생성할 때만 필요합니다. 기존 `data/ai_cache/`는 원문이 같은 서비스에 한해 재사용합니다.
 
@@ -205,7 +211,7 @@ cp .env.example .env
 
 자동 배포는 `.github/workflows/deploy-vercel.yml`에서 관리합니다.
 배포용 `VERCEL_TOKEN`은 저장소의 Actions Secret에 등록했습니다.
-공공데이터 키 `DATA_GO_KR_KEY`는 Vercel 프로젝트의 **Production·Preview 비밀 환경변수**로 등록했습니다. 값은 저장소에 넣지 않습니다.
+공공데이터 키 `DATA_GO_KR_KEY`, `DATA_GO_KR_KEY_2`, `DATA_GO_KR_KEY_3`와 MongoDB 연결 문자열 `MONGODB_URI`는 Vercel의 비밀 환경변수로 관리합니다. 값은 저장소에 넣지 않습니다.
 `main` 변경마다 기존 테스트를 통과한 뒤 현재 Vercel 프로젝트로 운영 배포합니다.
 PR 브랜치에 push하는 것만으로는 배포하지 않습니다.
 
@@ -230,7 +236,9 @@ Framework Preset은 **Container**이고, 루트의 `Dockerfile`이 원본 `strea
 | `.dockerignore`, `.vercelignore` | 인증 정보·환경 파일·로컬 개발 파일을 배포에서 제외 |
 | `.github/workflows/deploy-vercel.yml` | `main` 변경 시 기존 테스트를 실행하고 Vercel에 자동 배포 |
 | `docs/vercel-deployment.md` | 배포 절차, 확인 결과와 운영 제약 |
-| `src/welfare_api.py` | 중앙·지자체 API 전체 목록 페이지 조회, 요청한 서비스 상세 조회, 캐시·재시도·오류 처리 |
+| `src/welfare_api.py` | 중앙·지자체 API 요청, 키별 호출 예약·재시도, DB 읽기와 자동 갱신 시작 |
+| `src/welfare_store.py` | MongoDB 목록·상세·분석 저장, 갱신 잠금, 일일 호출량 |
+| `src/welfare_sync.py` | 일일 전체 목록 비교, 추가·변경·삭제 반영, 미수집 상세 이어받기 |
 | `src/collect_sample.py` | 검증용 샘플 XML 수집 도구. 운영 앱의 데이터 로딩에는 사용하지 않음 |
 | `src/parse.py` | 중앙·지자체 목록·상세 XML을 같은 모양으로 정리. 파일 로더는 테스트·원문 대조용 |
 | `src/rules.py` | 점수에 넣을 값 뽑기(온라인·방문·기관·조건·서류). AI와 비교하는 기준선이기도 함 |
@@ -243,9 +251,11 @@ Framework Preset은 **Container**이고, 루트의 `Dockerfile`이 원본 `strea
 ### 명령
 
 ```bash
-.venv/bin/python src/pipeline.py                 # API 전체 목록 건수와 현재 캐시의 점수 상위 10개
+.venv/bin/python src/pipeline.py                 # DB 목록 건수와 저장된 자료의 점수 상위 10개
 .venv/bin/python src/pipeline.py --sample        # 보관된 샘플로 규칙 계산 재현
 .venv/bin/python src/pipeline.py --sample --ai   # 샘플 AI 결과 만들기(LLM_API_KEY 필요)
+.venv/bin/python src/welfare_sync.py --seconds 210  # 같은 일일 예산으로 수동 수집·재개
+.venv/bin/pip install -r requirements-dev.txt
 .venv/bin/python -m unittest discover -s tests -v
 ```
 
