@@ -97,11 +97,32 @@ AI 예측이 아니라 정해진 항목을 더하는 방식이라, 점수마다 
 
 팀원은 3명입니다.
 
-| 이름 | 맡은 일 | GitHub |
-| --- | --- | --- |
-| 박다윗 | 배포(Streamlit Cloud), 저장소·협업 규칙 관리, README 작성, 전체 데이터 수집(예정) | [DavidPark04](https://github.com/DavidPark04) |
-| 최재용 | 데이터 수집(API 샘플 50건), 데이터 전처리, 문턱 점수 지표 설계·계산, AI 쉬운 설명·숫자 검사, Streamlit UI 설계·구현, 정답표 50건 작성·검수 | [JAEYONGsWorkSpace](https://github.com/JAEYONGsWorkSpace) |
-| 김도형 | 발표자료(PPT) | [kdh0381](https://github.com/kdh0381) |
+<table>
+  <thead>
+    <tr>
+      <th width="90" nowrap>이름</th>
+      <th>맡은 일</th>
+      <th>GitHub</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td nowrap>박다윗</td>
+      <td>배포(Streamlit Cloud), 저장소·협업 규칙 관리, README 작성, 전체 데이터 수집(예정)</td>
+      <td><a href="https://github.com/DavidPark04">DavidPark04</a></td>
+    </tr>
+    <tr>
+      <td nowrap>최재용</td>
+      <td>데이터 수집(API 샘플 50건), 데이터 전처리, 문턱 점수 지표 설계·계산, AI 쉬운 설명·숫자 검사, Streamlit UI 설계·구현, 정답표 50건 작성·검수</td>
+      <td><a href="https://github.com/JAEYONGsWorkSpace">JAEYONGsWorkSpace</a></td>
+    </tr>
+    <tr>
+      <td nowrap>김도형</td>
+      <td>발표자료(PPT), 배포(vercel cloud)</td>
+      <td><a href="https://github.com/kdh0381">kdh0381</a></td>
+    </tr>
+  </tbody>
+</table>
 
 (예정)은 아직 하지 않은 일입니다. 남은 일은 분석 단계별로 나눕니다.
 
