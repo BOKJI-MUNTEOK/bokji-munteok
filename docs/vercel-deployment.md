@@ -3,6 +3,18 @@
 Vercel에서는 Streamlit 서버 대신 `main.py`의 FastAPI 앱과 `web/` 화면을 실행합니다.
 `src/`의 샘플 파싱, 규칙 점수, 추천, AI 캐시, 정답표 비교, PDF/ZIP 생성 코드는 두 화면이 공유합니다.
 
+운영 주소: https://bokji-munteok.vercel.app/find
+
+현재 `kdh0381/bokji-munteok` Vercel 프로젝트에 CLI로 배포되어 있습니다.
+GitHub 조직 앱 연결은 조직 소유자 승인이 필요해 자동 배포는 아직 연결되지 않았습니다.
+승인 전에는 최신 main에서 다음 명령으로 배포합니다.
+
+```bash
+vercel login
+vercel link --project bokji-munteok --scope kdh0381
+vercel deploy --prod --scope kdh0381
+```
+
 ## 실행
 
 ```bash
