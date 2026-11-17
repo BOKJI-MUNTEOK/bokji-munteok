@@ -114,7 +114,7 @@ AI 예측이 아니라 정해진 항목을 더하는 방식이라, 점수마다 
 
 - Vercel 배포 주소: https://bokji-munteok.vercel.app
 - 기존 Streamlit 배포 주소: https://bokji-munteok.streamlit.app
-- `main`에 합친 뒤 Vercel CLI로 배포합니다. 배포 설정은 kdh0381 계정의 Vercel에서 관리합니다.
+- 배포용 인증 키를 등록하면 `main`에 합칠 때 GitHub Actions가 Vercel로 자동 배포합니다. 배포 설정은 kdh0381 계정의 Vercel에서 관리합니다.
 
 ## 9. 코드와 실행 방법
 
@@ -130,7 +130,13 @@ AI 결과는 `data/ai_cache/`에 저장돼 있어 API 키가 없어도 화면이
 
 ### Vercel 배포
 
-Vercel CLI가 설치된 환경에서 저장소 루트를 기준으로 실행합니다.
+자동 배포는 `.github/workflows/deploy-vercel.yml`에서 관리합니다.
+저장소의 Actions Secret에 `VERCEL_TOKEN`을 등록하고 이 설정을 `main`에 합치면,
+이후 `main` 변경마다 기존 테스트를 통과한 뒤 현재 Vercel 프로젝트로 운영 배포합니다.
+PR 브랜치에 push하는 것만으로는 배포하지 않습니다.
+
+인증 키 등록과 실행 확인 방법은 [배포 안내](docs/vercel-deployment.md#자동-배포-설정)를 참고합니다.
+수동 배포가 필요하면 Vercel CLI가 설치된 환경에서 저장소 루트를 기준으로 실행합니다.
 
 ```bash
 vercel login
@@ -148,6 +154,7 @@ Framework Preset은 **Container**이고, 루트의 `Dockerfile`이 원본 `strea
 | `app.py` | 기존 Streamlit 화면: 홈, 내 복지 찾기, 전체 서비스, 데이터 분석, 안내 |
 | `Dockerfile`, `vercel.json` | 기존 Streamlit 앱을 Vercel Container Runtime에서 실행하는 배포 설정 |
 | `.dockerignore`, `.vercelignore` | 인증 정보·환경 파일·로컬 개발 파일을 배포에서 제외 |
+| `.github/workflows/deploy-vercel.yml` | `main` 변경 시 기존 테스트를 실행하고 Vercel에 자동 배포 |
 | `docs/vercel-deployment.md` | 배포 절차, 확인 결과와 운영 제약 |
 | `src/collect_sample.py` | 복지서비스 API에서 상세 XML 받기 → `data/raw/` (`.env`의 `DATA_GO_KR_KEY`) |
 | `src/parse.py` | 중앙·지자체 XML을 같은 모양으로 정리. `data/raw/`가 없으면 `data/sample/` 50건 사용 |
