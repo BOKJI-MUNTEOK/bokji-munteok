@@ -2,8 +2,9 @@
 
 빅데이터실습[YC] 기말 데이터분석 프로젝트 저장소입니다.
 
-> **진행 상태: 시연 앱 1차본 (11/16)**
+> **진행 상태: 시연 앱 · Vercel 운영 배포 완료 (11/17)**
 > 샘플 50건으로 문턱 점수(기준표)와 AI 신청 보조 화면을 만들었습니다. 가중치, 팀원 역할, 정답표 검증은 아직 확정하지 않았습니다.
+> 기존 Streamlit 앱의 코드·UI·기능을 유지하고, Vercel 컨테이너에서 `app.py`를 실행합니다. [서비스 열기](https://bokji-munteok.vercel.app/)
 
 ## 목차
 
@@ -111,12 +112,17 @@ AI 예측이 아니라 정해진 항목을 더하는 방식이라, 점수마다 
 
 ## 8. 배포 URL
 
-- Streamlit 배포 주소: https://bokji-munteok.streamlit.app
-- `main`에 합치면 자동으로 다시 배포됩니다. 배포 설정은 DavidPark04 계정의 Streamlit Community Cloud에서 관리합니다.
+- **현재 운영 주소**: [복지문턱](https://bokji-munteok.vercel.app/)
+- **내 복지 찾기**: [바로 시작하기](https://bokji-munteok.vercel.app/find)
+- 기존 Streamlit Cloud 주소: https://bokji-munteok.streamlit.app
+
+현재 운영 환경은 `kdh0381/bokji-munteok` Vercel 프로젝트의 **Container Runtime**입니다. 기존 Streamlit 앱을 그대로 실행하며, 배포에 필요한 설정만 추가했습니다.
+
+Vercel의 GitHub 자동 배포는 연결되어 있지 않습니다. `main` 병합 후 아래 CLI 명령으로 운영 배포합니다. 설정과 운영 제약은 [Vercel 배포 안내](docs/vercel-deployment.md)를 참고하세요.
 
 ## 9. 코드와 실행 방법
 
-### 실행
+### 로컬 실행
 
 ```bash
 python3 -m venv .venv
@@ -126,11 +132,27 @@ python3 -m venv .venv
 
 AI 결과는 `data/ai_cache/`에 저장돼 있어 API 키가 없어도 화면이 열립니다.
 
+### Vercel 배포
+
+Vercel CLI가 설치된 환경에서 저장소 루트를 기준으로 실행합니다.
+
+```bash
+vercel login
+vercel link --project bokji-munteok --scope kdh0381
+vercel deploy --scope kdh0381          # Preview 배포
+vercel deploy --prod --scope kdh0381   # 운영 배포
+```
+
+Framework Preset은 **Container**이고, 루트의 `Dockerfile`이 원본 `streamlit run app.py`를 HTTP 80번 포트로 실행합니다. 로컬 실행 명령은 그대로입니다.
+
 ### 폴더
 
 | 파일 | 하는 일 |
 | --- | --- |
-| `app.py` | 화면: ① 문턱 점수(기준표) ② 신청 보조(AI) ③ 신청서 채우기(설계) ④ 검증 ⑤ 계산 기준 |
+| `app.py` | 기존 Streamlit 화면: 홈, 내 복지 찾기, 전체 서비스, 데이터 분석, 안내 |
+| `Dockerfile`, `vercel.json` | 기존 Streamlit 앱을 Vercel Container Runtime에서 실행하는 배포 설정 |
+| `.dockerignore`, `.vercelignore` | 인증 정보·환경 파일·로컬 개발 파일을 배포에서 제외 |
+| `docs/vercel-deployment.md` | 배포 절차, 확인 결과와 운영 제약 |
 | `src/collect_sample.py` | 복지서비스 API에서 상세 XML 받기 → `data/raw/` (`.env`의 `DATA_GO_KR_KEY`) |
 | `src/parse.py` | 중앙·지자체 XML을 같은 모양으로 정리. `data/raw/`가 없으면 `data/sample/` 50건 사용 |
 | `src/rules.py` | 점수에 넣을 값 뽑기(온라인·방문·기관·조건·서류). AI와 비교하는 기준선이기도 함 |
