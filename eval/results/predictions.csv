@@ -1,0 +1,251 @@
+﻿servId,service,source,review,field,gold,rule,ai,gold_eligible,ai_available
+WLF00000022,산재근로자 사회심리재활지원,중앙,AI 재검토,online,False,False,False,True,True
+WLF00000022,산재근로자 사회심리재활지원,중앙,AI 재검토,visit_required,True,False,True,True,True
+WLF00000022,산재근로자 사회심리재활지원,중앙,AI 재검토,n_agencies,3,3,3,True,True
+WLF00000022,산재근로자 사회심리재활지원,중앙,AI 재검토,n_conditions,2,2,11,True,True
+WLF00000022,산재근로자 사회심리재활지원,중앙,AI 재검토,n_documents,,,,True,True
+WLF00000023,농어가목돈마련저축 저축장려금 지급,중앙,AI 재검토,online,False,False,False,True,True
+WLF00000023,농어가목돈마련저축 저축장려금 지급,중앙,AI 재검토,visit_required,True,False,True,True,True
+WLF00000023,농어가목돈마련저축 저축장려금 지급,중앙,AI 재검토,n_agencies,3,3,3,True,True
+WLF00000023,농어가목돈마련저축 저축장려금 지급,중앙,AI 재검토,n_conditions,2,3,6,True,True
+WLF00000023,농어가목돈마련저축 저축장려금 지급,중앙,AI 재검토,n_documents,,,,True,True
+WLF00000024,아이돌봄서비스,중앙,사람 검수,online,True,True,True,True,True
+WLF00000024,아이돌봄서비스,중앙,사람 검수,visit_required,False,False,False,True,True
+WLF00000024,아이돌봄서비스,중앙,사람 검수,n_agencies,3,3,3,True,True
+WLF00000024,아이돌봄서비스,중앙,사람 검수,n_conditions,4,8,16,True,True
+WLF00000024,아이돌봄서비스,중앙,사람 검수,n_documents,,,,True,True
+WLF00000025,장애인일자리지원,중앙,AI 재검토,online,False,False,False,True,True
+WLF00000025,장애인일자리지원,중앙,AI 재검토,visit_required,True,False,True,True,True
+WLF00000025,장애인일자리지원,중앙,AI 재검토,n_agencies,3,3,3,True,True
+WLF00000025,장애인일자리지원,중앙,AI 재검토,n_conditions,3,5,10,True,True
+WLF00000025,장애인일자리지원,중앙,AI 재검토,n_documents,,,1,True,True
+WLF00000026,장애인자립자금대여,중앙,AI 재검토,online,True,True,True,True,True
+WLF00000026,장애인자립자금대여,중앙,AI 재검토,visit_required,False,False,False,True,True
+WLF00000026,장애인자립자금대여,중앙,AI 재검토,n_agencies,3,3,3,True,True
+WLF00000026,장애인자립자금대여,중앙,AI 재검토,n_conditions,3,4,4,True,True
+WLF00000026,장애인자립자금대여,중앙,AI 재검토,n_documents,,,,True,True
+WLF00000027,장애인 운전교육 사업,중앙,사람 검수,online,False,False,False,True,True
+WLF00000027,장애인 운전교육 사업,중앙,사람 검수,visit_required,True,False,False,True,True
+WLF00000027,장애인 운전교육 사업,중앙,사람 검수,n_agencies,3,3,3,True,True
+WLF00000027,장애인 운전교육 사업,중앙,사람 검수,n_conditions,4,2,10,True,True
+WLF00000027,장애인 운전교육 사업,중앙,사람 검수,n_documents,,,,True,True
+WLF00000028,공동육아나눔터 운영,중앙,AI 재검토,online,False,False,False,True,True
+WLF00000028,공동육아나눔터 운영,중앙,AI 재검토,visit_required,False,False,False,True,True
+WLF00000028,공동육아나눔터 운영,중앙,AI 재검토,n_agencies,0,2,2,True,True
+WLF00000028,공동육아나눔터 운영,중앙,AI 재검토,n_conditions,0,1,1,True,True
+WLF00000028,공동육아나눔터 운영,중앙,AI 재검토,n_documents,,,,True,True
+WLF00000030,육아종합지원서비스 제공,중앙,AI 재검토,online,False,False,False,True,True
+WLF00000030,육아종합지원서비스 제공,중앙,AI 재검토,visit_required,False,False,False,True,True
+WLF00000030,육아종합지원서비스 제공,중앙,AI 재검토,n_agencies,2,2,2,True,True
+WLF00000030,육아종합지원서비스 제공,중앙,AI 재검토,n_conditions,1,1,3,True,True
+WLF00000030,육아종합지원서비스 제공,중앙,AI 재검토,n_documents,,,,True,True
+WLF00000031,노후준비서비스,중앙,사람 검수,online,False,False,False,True,True
+WLF00000031,노후준비서비스,중앙,사람 검수,visit_required,False,False,False,True,True
+WLF00000031,노후준비서비스,중앙,사람 검수,n_agencies,2,3,2,True,True
+WLF00000031,노후준비서비스,중앙,사람 검수,n_conditions,0,0,1,True,True
+WLF00000031,노후준비서비스,중앙,사람 검수,n_documents,,,,True,True
+WLF00000032,실종아동 등 보호 및 지원,중앙,AI 재검토,online,False,False,False,True,True
+WLF00000032,실종아동 등 보호 및 지원,중앙,AI 재검토,visit_required,False,False,False,True,True
+WLF00000032,실종아동 등 보호 및 지원,중앙,AI 재검토,n_agencies,2,2,3,True,True
+WLF00000032,실종아동 등 보호 및 지원,중앙,AI 재검토,n_conditions,1,2,3,True,True
+WLF00000032,실종아동 등 보호 및 지원,중앙,AI 재검토,n_documents,,,,True,True
+WLF00000033,노인복지민간단체지원,중앙,AI 재검토,online,False,False,False,True,True
+WLF00000033,노인복지민간단체지원,중앙,AI 재검토,visit_required,True,False,False,True,True
+WLF00000033,노인복지민간단체지원,중앙,AI 재검토,n_agencies,3,3,3,True,True
+WLF00000033,노인복지민간단체지원,중앙,AI 재검토,n_conditions,2,2,1,True,True
+WLF00000033,노인복지민간단체지원,중앙,AI 재검토,n_documents,,,,True,True
+WLF00000035,개발제한구역 거주민 생활비용보조사업,중앙,사람 검수,online,False,False,False,True,True
+WLF00000035,개발제한구역 거주민 생활비용보조사업,중앙,사람 검수,visit_required,True,False,True,True,True
+WLF00000035,개발제한구역 거주민 생활비용보조사업,중앙,사람 검수,n_agencies,3,3,3,True,True
+WLF00000035,개발제한구역 거주민 생활비용보조사업,중앙,사람 검수,n_conditions,2,3,5,True,True
+WLF00000035,개발제한구역 거주민 생활비용보조사업,중앙,사람 검수,n_documents,,,,True,True
+WLF00000036,주거취약계층 주거상향 지원사업,중앙,AI 재검토,online,False,False,False,True,True
+WLF00000036,주거취약계층 주거상향 지원사업,중앙,AI 재검토,visit_required,True,False,True,True,True
+WLF00000036,주거취약계층 주거상향 지원사업,중앙,AI 재검토,n_agencies,3,3,3,True,True
+WLF00000036,주거취약계층 주거상향 지원사업,중앙,AI 재검토,n_conditions,2,2,2,True,True
+WLF00000036,주거취약계층 주거상향 지원사업,중앙,AI 재검토,n_documents,,,,True,True
+WLF00000037,시간제보육 지원,중앙,AI 재검토,online,True,False,True,True,True
+WLF00000037,시간제보육 지원,중앙,AI 재검토,visit_required,False,False,False,True,True
+WLF00000037,시간제보육 지원,중앙,AI 재검토,n_agencies,3,3,3,True,True
+WLF00000037,시간제보육 지원,중앙,AI 재검토,n_conditions,3,1,2,True,True
+WLF00000037,시간제보육 지원,중앙,AI 재검토,n_documents,,,,True,True
+WLF00000038,독립유공자 제수비 지급,중앙,사람 검수,online,False,False,False,True,True
+WLF00000038,독립유공자 제수비 지급,중앙,사람 검수,visit_required,True,False,False,True,True
+WLF00000038,독립유공자 제수비 지급,중앙,사람 검수,n_agencies,3,3,3,True,True
+WLF00000038,독립유공자 제수비 지급,중앙,사람 검수,n_conditions,1,2,2,True,True
+WLF00000038,독립유공자 제수비 지급,중앙,사람 검수,n_documents,,,,True,True
+WLF00000040,선천성대사이상 검사 및 환아관리,중앙,AI 재검토,online,False,False,False,True,True
+WLF00000040,선천성대사이상 검사 및 환아관리,중앙,AI 재검토,visit_required,True,False,True,True,True
+WLF00000040,선천성대사이상 검사 및 환아관리,중앙,AI 재검토,n_agencies,3,3,3,True,True
+WLF00000040,선천성대사이상 검사 및 환아관리,중앙,AI 재검토,n_conditions,2,3,7,True,True
+WLF00000040,선천성대사이상 검사 및 환아관리,중앙,AI 재검토,n_documents,,,1,True,True
+WLF00000041,어선원 및 어선 재해보상보험,중앙,AI 재검토,online,False,False,False,True,True
+WLF00000041,어선원 및 어선 재해보상보험,중앙,AI 재검토,visit_required,True,False,True,True,True
+WLF00000041,어선원 및 어선 재해보상보험,중앙,AI 재검토,n_agencies,3,3,3,True,True
+WLF00000041,어선원 및 어선 재해보상보험,중앙,AI 재검토,n_conditions,1,0,9,True,True
+WLF00000041,어선원 및 어선 재해보상보험,중앙,AI 재검토,n_documents,,,,True,True
+WLF00000043,보상금,중앙,사람 검수,online,False,False,False,True,True
+WLF00000043,보상금,중앙,사람 검수,visit_required,True,False,False,True,True
+WLF00000043,보상금,중앙,사람 검수,n_agencies,3,3,3,True,True
+WLF00000043,보상금,중앙,사람 검수,n_conditions,2,4,25,True,True
+WLF00000043,보상금,중앙,사람 검수,n_documents,,,,True,True
+WLF00000044,생활안정자금(융자),중앙,AI 재검토,online,False,False,False,True,True
+WLF00000044,생활안정자금(융자),중앙,AI 재검토,visit_required,True,False,True,True,True
+WLF00000044,생활안정자금(융자),중앙,AI 재검토,n_agencies,3,3,3,True,True
+WLF00000044,생활안정자금(융자),중앙,AI 재검토,n_conditions,2,3,6,True,True
+WLF00000044,생활안정자금(융자),중앙,AI 재검토,n_documents,,,,True,True
+WLF00000047,고혈압·당뇨병 등록관리사업,중앙,AI 재검토,online,False,False,False,True,True
+WLF00000047,고혈압·당뇨병 등록관리사업,중앙,AI 재검토,visit_required,True,False,True,True,True
+WLF00000047,고혈압·당뇨병 등록관리사업,중앙,AI 재검토,n_agencies,3,3,3,True,True
+WLF00000047,고혈압·당뇨병 등록관리사업,중앙,AI 재검토,n_conditions,3,2,4,True,True
+WLF00000047,고혈압·당뇨병 등록관리사업,중앙,AI 재검토,n_documents,,,,True,True
+WLF00000048,국가유공자등대부지원,중앙,사람 검수,online,False,False,False,True,True
+WLF00000048,국가유공자등대부지원,중앙,사람 검수,visit_required,True,False,True,True,True
+WLF00000048,국가유공자등대부지원,중앙,사람 검수,n_agencies,3,3,3,True,True
+WLF00000048,국가유공자등대부지원,중앙,사람 검수,n_conditions,2,4,24,True,True
+WLF00000048,국가유공자등대부지원,중앙,사람 검수,n_documents,,,,True,True
+WLF00000049,에너지 취약계층 고효율조명기기 무상교체 지원(취약계층 에너지복지사업),중앙,AI 재검토,online,False,False,False,True,True
+WLF00000049,에너지 취약계층 고효율조명기기 무상교체 지원(취약계층 에너지복지사업),중앙,AI 재검토,visit_required,True,False,True,True,True
+WLF00000049,에너지 취약계층 고효율조명기기 무상교체 지원(취약계층 에너지복지사업),중앙,AI 재검토,n_agencies,3,3,3,True,True
+WLF00000049,에너지 취약계층 고효율조명기기 무상교체 지원(취약계층 에너지복지사업),중앙,AI 재검토,n_conditions,1,3,8,True,True
+WLF00000049,에너지 취약계층 고효율조명기기 무상교체 지원(취약계층 에너지복지사업),중앙,AI 재검토,n_documents,,,,True,True
+WLF00000050,무공영예수당,중앙,AI 재검토,online,False,False,False,True,True
+WLF00000050,무공영예수당,중앙,AI 재검토,visit_required,True,False,True,True,True
+WLF00000050,무공영예수당,중앙,AI 재검토,n_agencies,3,3,3,True,True
+WLF00000050,무공영예수당,중앙,AI 재검토,n_conditions,2,2,3,True,True
+WLF00000050,무공영예수당,중앙,AI 재검토,n_documents,,,,True,True
+WLF00000051,고엽제환자2세수당,중앙,사람 검수,online,False,False,False,True,True
+WLF00000051,고엽제환자2세수당,중앙,사람 검수,visit_required,True,False,True,True,True
+WLF00000051,고엽제환자2세수당,중앙,사람 검수,n_agencies,3,3,3,True,True
+WLF00000051,고엽제환자2세수당,중앙,사람 검수,n_conditions,3,3,5,True,True
+WLF00000051,고엽제환자2세수당,중앙,사람 검수,n_documents,,,,True,True
+WLF00000052,인문100년장학금,중앙,AI 재검토,online,True,False,True,True,True
+WLF00000052,인문100년장학금,중앙,AI 재검토,visit_required,False,False,False,True,True
+WLF00000052,인문100년장학금,중앙,AI 재검토,n_agencies,3,3,3,True,True
+WLF00000052,인문100년장학금,중앙,AI 재검토,n_conditions,3,0,5,True,True
+WLF00000052,인문100년장학금,중앙,AI 재검토,n_documents,,,,True,True
+WLF00000441,다문화가족 자녀 학습지원,지자체,사람 검수,online,False,False,False,True,True
+WLF00000441,다문화가족 자녀 학습지원,지자체,사람 검수,visit_required,False,True,False,True,True
+WLF00000441,다문화가족 자녀 학습지원,지자체,사람 검수,n_agencies,3,2,2,True,True
+WLF00000441,다문화가족 자녀 학습지원,지자체,사람 검수,n_conditions,3,4,3,True,True
+WLF00000441,다문화가족 자녀 학습지원,지자체,사람 검수,n_documents,,,,True,True
+WLF00001634,보훈예우수당,지자체,AI 재검토,online,False,False,False,True,True
+WLF00001634,보훈예우수당,지자체,AI 재검토,visit_required,False,True,False,True,True
+WLF00001634,보훈예우수당,지자체,AI 재검토,n_agencies,1,2,1,True,True
+WLF00001634,보훈예우수당,지자체,AI 재검토,n_conditions,2,2,2,True,True
+WLF00001634,보훈예우수당,지자체,AI 재검토,n_documents,3,3,3,True,True
+WLF00001710,노인 장수수당,지자체,AI 재검토,online,False,False,False,True,True
+WLF00001710,노인 장수수당,지자체,AI 재검토,visit_required,True,True,True,True,True
+WLF00001710,노인 장수수당,지자체,AI 재검토,n_agencies,1,1,1,True,True
+WLF00001710,노인 장수수당,지자체,AI 재검토,n_conditions,3,2,3,True,True
+WLF00001710,노인 장수수당,지자체,AI 재검토,n_documents,,,,True,True
+WLF00002438,군민 화장장려금 지원 사업,지자체,사람 검수,online,False,False,False,True,True
+WLF00002438,군민 화장장려금 지원 사업,지자체,사람 검수,visit_required,True,True,True,True,True
+WLF00002438,군민 화장장려금 지원 사업,지자체,사람 검수,n_agencies,1,1,1,True,True
+WLF00002438,군민 화장장려금 지원 사업,지자체,사람 검수,n_conditions,3,2,6,True,True
+WLF00002438,군민 화장장려금 지원 사업,지자체,사람 검수,n_documents,5,5,5,True,True
+WLF00003366,장애인가정 출산지원금,지자체,AI 재검토,online,False,False,False,True,True
+WLF00003366,장애인가정 출산지원금,지자체,AI 재검토,visit_required,True,True,True,True,True
+WLF00003366,장애인가정 출산지원금,지자체,AI 재검토,n_agencies,1,1,1,True,True
+WLF00003366,장애인가정 출산지원금,지자체,AI 재검토,n_conditions,3,3,3,True,True
+WLF00003366,장애인가정 출산지원금,지자체,AI 재검토,n_documents,2,,2,True,True
+WLF00003424,해남군 장애인보조기기 수리비용 지원,지자체,AI 재검토,online,False,False,False,True,True
+WLF00003424,해남군 장애인보조기기 수리비용 지원,지자체,AI 재검토,visit_required,False,True,False,True,True
+WLF00003424,해남군 장애인보조기기 수리비용 지원,지자체,AI 재검토,n_agencies,3,3,3,True,True
+WLF00003424,해남군 장애인보조기기 수리비용 지원,지자체,AI 재검토,n_conditions,3,2,3,True,True
+WLF00003424,해남군 장애인보조기기 수리비용 지원,지자체,AI 재검토,n_documents,1,,1,True,True
+WLF00003430,저소득층 특별구호,지자체,사람 검수,online,False,False,False,True,True
+WLF00003430,저소득층 특별구호,지자체,사람 검수,visit_required,True,True,True,True,True
+WLF00003430,저소득층 특별구호,지자체,사람 검수,n_agencies,2,2,1,True,True
+WLF00003430,저소득층 특별구호,지자체,사람 검수,n_conditions,1,4,6,True,True
+WLF00003430,저소득층 특별구호,지자체,사람 검수,n_documents,,,,True,True
+WLF00003833,창원시 신혼부부 전세자금 대출이자 지원,지자체,AI 재검토,online,False,False,False,True,True
+WLF00003833,창원시 신혼부부 전세자금 대출이자 지원,지자체,AI 재검토,visit_required,True,True,True,True,True
+WLF00003833,창원시 신혼부부 전세자금 대출이자 지원,지자체,AI 재검토,n_agencies,1,1,1,True,True
+WLF00003833,창원시 신혼부부 전세자금 대출이자 지원,지자체,AI 재검토,n_conditions,5,4,8,True,True
+WLF00003833,창원시 신혼부부 전세자금 대출이자 지원,지자체,AI 재검토,n_documents,,,,True,True
+WLF00003872,신혼부부 주택자금 대출이자 지원사업,지자체,AI 재검토,online,False,False,False,True,True
+WLF00003872,신혼부부 주택자금 대출이자 지원사업,지자체,AI 재검토,visit_required,True,True,True,True,True
+WLF00003872,신혼부부 주택자금 대출이자 지원사업,지자체,AI 재검토,n_agencies,1,1,1,True,True
+WLF00003872,신혼부부 주택자금 대출이자 지원사업,지자체,AI 재검토,n_conditions,5,4,5,True,True
+WLF00003872,신혼부부 주택자금 대출이자 지원사업,지자체,AI 재검토,n_documents,,,,True,True
+WLF00004120,공공실버주택(누리타운) 관리지원 사업,지자체,사람 검수,online,False,False,False,True,True
+WLF00004120,공공실버주택(누리타운) 관리지원 사업,지자체,사람 검수,visit_required,False,False,False,True,True
+WLF00004120,공공실버주택(누리타운) 관리지원 사업,지자체,사람 검수,n_agencies,0,1,0,True,True
+WLF00004120,공공실버주택(누리타운) 관리지원 사업,지자체,사람 검수,n_conditions,4,3,5,True,True
+WLF00004120,공공실버주택(누리타운) 관리지원 사업,지자체,사람 검수,n_documents,,,,True,True
+WLF00004691,고양시 출산가구 전월세자금 대출이자 지원,지자체,AI 재검토,online,False,False,False,True,True
+WLF00004691,고양시 출산가구 전월세자금 대출이자 지원,지자체,AI 재검토,visit_required,True,True,True,True,True
+WLF00004691,고양시 출산가구 전월세자금 대출이자 지원,지자체,AI 재검토,n_agencies,1,1,1,True,True
+WLF00004691,고양시 출산가구 전월세자금 대출이자 지원,지자체,AI 재검토,n_conditions,5,5,10,True,True
+WLF00004691,고양시 출산가구 전월세자금 대출이자 지원,지자체,AI 재검토,n_documents,,,,True,True
+WLF00004763,해남형 청년 주거비 지원사업,지자체,AI 재검토,online,False,False,True,True,True
+WLF00004763,해남형 청년 주거비 지원사업,지자체,AI 재검토,visit_required,False,True,False,True,True
+WLF00004763,해남형 청년 주거비 지원사업,지자체,AI 재검토,n_agencies,2,1,2,True,True
+WLF00004763,해남형 청년 주거비 지원사업,지자체,AI 재검토,n_conditions,5,5,5,True,True
+WLF00004763,해남형 청년 주거비 지원사업,지자체,AI 재검토,n_documents,,,,True,True
+WLF00004802,창원시 다자녀(셋째아이상)가구 전세자금 이자 지원,지자체,사람 검수,online,False,False,False,True,True
+WLF00004802,창원시 다자녀(셋째아이상)가구 전세자금 이자 지원,지자체,사람 검수,visit_required,True,True,True,True,True
+WLF00004802,창원시 다자녀(셋째아이상)가구 전세자금 이자 지원,지자체,사람 검수,n_agencies,1,1,1,True,True
+WLF00004802,창원시 다자녀(셋째아이상)가구 전세자금 이자 지원,지자체,사람 검수,n_conditions,4,5,5,True,True
+WLF00004802,창원시 다자녀(셋째아이상)가구 전세자금 이자 지원,지자체,사람 검수,n_documents,,,,True,True
+WLF00005086,성남시 60세 이상 저소득층 및 65세 이상 대상포진 예방접종 지원사업,지자체,AI 재검토,online,False,False,False,True,True
+WLF00005086,성남시 60세 이상 저소득층 및 65세 이상 대상포진 예방접종 지원사업,지자체,AI 재검토,visit_required,True,True,True,True,True
+WLF00005086,성남시 60세 이상 저소득층 및 65세 이상 대상포진 예방접종 지원사업,지자체,AI 재검토,n_agencies,1,2,1,True,True
+WLF00005086,성남시 60세 이상 저소득층 및 65세 이상 대상포진 예방접종 지원사업,지자체,AI 재검토,n_conditions,2,4,6,True,True
+WLF00005086,성남시 60세 이상 저소득층 및 65세 이상 대상포진 예방접종 지원사업,지자체,AI 재검토,n_documents,2,4,5,True,True
+WLF00005234,성동구 청년 등 탈모 치료 지원,지자체,AI 재검토,online,True,True,True,True,True
+WLF00005234,성동구 청년 등 탈모 치료 지원,지자체,AI 재검토,visit_required,False,False,False,True,True
+WLF00005234,성동구 청년 등 탈모 치료 지원,지자체,AI 재검토,n_agencies,3,3,2,True,True
+WLF00005234,성동구 청년 등 탈모 치료 지원,지자체,AI 재검토,n_conditions,4,3,4,True,True
+WLF00005234,성동구 청년 등 탈모 치료 지원,지자체,AI 재검토,n_documents,,,,True,True
+WLF00005449,가임력 보존지원 사업,지자체,사람 검수,online,False,False,False,True,True
+WLF00005449,가임력 보존지원 사업,지자체,사람 검수,visit_required,True,True,True,True,True
+WLF00005449,가임력 보존지원 사업,지자체,사람 검수,n_agencies,2,2,2,True,True
+WLF00005449,가임력 보존지원 사업,지자체,사람 검수,n_conditions,7,6,8,True,True
+WLF00005449,가임력 보존지원 사업,지자체,사람 검수,n_documents,1,,1,True,True
+WLF00005942,청년 어학·자격 시험 응시료 지원사업,지자체,AI 재검토,online,False,False,True,True,True
+WLF00005942,청년 어학·자격 시험 응시료 지원사업,지자체,AI 재검토,visit_required,False,True,False,True,True
+WLF00005942,청년 어학·자격 시험 응시료 지원사업,지자체,AI 재검토,n_agencies,1,2,1,True,True
+WLF00005942,청년 어학·자격 시험 응시료 지원사업,지자체,AI 재검토,n_conditions,4,3,4,True,True
+WLF00005942,청년 어학·자격 시험 응시료 지원사업,지자체,AI 재검토,n_documents,,,,True,True
+WLF00006794,2026년 충청남도 청년 주택임차보증금 이자 지원사업,지자체,AI 재검토,online,True,True,True,True,True
+WLF00006794,2026년 충청남도 청년 주택임차보증금 이자 지원사업,지자체,AI 재검토,visit_required,False,False,False,True,True
+WLF00006794,2026년 충청남도 청년 주택임차보증금 이자 지원사업,지자체,AI 재검토,n_agencies,1,2,3,True,True
+WLF00006794,2026년 충청남도 청년 주택임차보증금 이자 지원사업,지자체,AI 재검토,n_conditions,5,5,5,True,True
+WLF00006794,2026년 충청남도 청년 주택임차보증금 이자 지원사업,지자체,AI 재검토,n_documents,10,8,10,True,True
+WLF00006798,행복둥지 사랑의 집수리,지자체,사람 검수,online,False,False,False,True,True
+WLF00006798,행복둥지 사랑의 집수리,지자체,사람 검수,visit_required,False,True,False,True,True
+WLF00006798,행복둥지 사랑의 집수리,지자체,사람 검수,n_agencies,2,2,2,True,True
+WLF00006798,행복둥지 사랑의 집수리,지자체,사람 검수,n_conditions,2,4,4,True,True
+WLF00006798,행복둥지 사랑의 집수리,지자체,사람 검수,n_documents,,,,True,True
+WLF00006799,주거약자 이사지원,지자체,AI 재검토,online,False,False,False,True,True
+WLF00006799,주거약자 이사지원,지자체,AI 재검토,visit_required,True,True,True,True,True
+WLF00006799,주거약자 이사지원,지자체,AI 재검토,n_agencies,2,2,2,True,True
+WLF00006799,주거약자 이사지원,지자체,AI 재검토,n_conditions,3,4,6,True,True
+WLF00006799,주거약자 이사지원,지자체,AI 재검토,n_documents,4,4,4,True,True
+WLF00006800,장애어르신 쉼마루,지자체,AI 재검토,online,False,False,False,True,True
+WLF00006800,장애어르신 쉼마루,지자체,AI 재검토,visit_required,False,True,False,True,True
+WLF00006800,장애어르신 쉼마루,지자체,AI 재검토,n_agencies,1,1,1,True,True
+WLF00006800,장애어르신 쉼마루,지자체,AI 재검토,n_conditions,0,2,0,True,True
+WLF00006800,장애어르신 쉼마루,지자체,AI 재검토,n_documents,,,,True,True
+WLF00006801,장애인 체력단련센터 운영,지자체,사람 검수,online,False,False,False,True,True
+WLF00006801,장애인 체력단련센터 운영,지자체,사람 검수,visit_required,False,True,False,True,True
+WLF00006801,장애인 체력단련센터 운영,지자체,사람 검수,n_agencies,1,1,1,True,True
+WLF00006801,장애인 체력단련센터 운영,지자체,사람 검수,n_conditions,1,2,2,True,True
+WLF00006801,장애인 체력단련센터 운영,지자체,사람 검수,n_documents,,,,True,True
+WLF00006802,광명시 시민정보화교육장,지자체,AI 재검토,online,False,False,False,True,True
+WLF00006802,광명시 시민정보화교육장,지자체,AI 재검토,visit_required,False,True,False,True,True
+WLF00006802,광명시 시민정보화교육장,지자체,AI 재검토,n_agencies,1,1,1,True,True
+WLF00006802,광명시 시민정보화교육장,지자체,AI 재검토,n_conditions,1,2,3,True,True
+WLF00006802,광명시 시민정보화교육장,지자체,AI 재검토,n_documents,,,,True,True
+WLF00006803,장애인가족사랑여행지원사업,지자체,AI 재검토,online,False,False,False,True,True
+WLF00006803,장애인가족사랑여행지원사업,지자체,AI 재검토,visit_required,True,True,True,True,True
+WLF00006803,장애인가족사랑여행지원사업,지자체,AI 재검토,n_agencies,1,1,1,True,True
+WLF00006803,장애인가족사랑여행지원사업,지자체,AI 재검토,n_conditions,3,2,3,True,True
+WLF00006803,장애인가족사랑여행지원사업,지자체,AI 재검토,n_documents,4,,4,True,True
+WLF00006804,포천시 다자녀가정 포천 쌀 지원사업,지자체,사람 검수,online,False,False,False,True,True
+WLF00006804,포천시 다자녀가정 포천 쌀 지원사업,지자체,사람 검수,visit_required,True,True,True,True,True
+WLF00006804,포천시 다자녀가정 포천 쌀 지원사업,지자체,사람 검수,n_agencies,1,1,1,True,True
+WLF00006804,포천시 다자녀가정 포천 쌀 지원사업,지자체,사람 검수,n_conditions,2,2,2,True,True
+WLF00006804,포천시 다자녀가정 포천 쌀 지원사업,지자체,사람 검수,n_documents,,,,True,True
