@@ -67,7 +67,9 @@ def compare(pred: dict, ref: dict) -> dict:
         pairs = [(pred[i][f], ref[i][f]) for i in ids]
         out[f] = round(100 * sum(a == b for a, b in pairs) / len(pairs), 1) if pairs else None
         if f.startswith("n_"):
-            nums = [(a or 0, b or 0) for a, b in pairs]
+            # 서류 정보 없음(None)은 0개가 아니다. 실제 숫자가 있는 쌍만 MAE에 넣는다.
+            nums = [(a, b) for a, b in pairs if a is not None and b is not None]
+            out[f + "_mae_n"] = len(nums)
             out[f + "_mae"] = round(sum(abs(a - b) for a, b in nums) / len(nums), 2) if nums else None
     return out
 
