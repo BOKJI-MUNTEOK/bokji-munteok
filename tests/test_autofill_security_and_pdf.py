@@ -981,7 +981,7 @@ class TestAutofillSecurityAndEngines(unittest.TestCase):
                         {"cell_idx": 0, "row": 0, "col": 0, "row_span": 1, "col_span": 1, "text": "연 락 처", "width": 8000, "height": 2000},
                         {"cell_idx": 1, "row": 0, "col": 1, "row_span": 1, "col_span": 1, "text": "자택 :\n휴대폰 :", "width": 16000, "height": 3600, "para_pt100s": [1000, 1000]},
                         {"cell_idx": 2, "row": 1, "col": 0, "row_span": 1, "col_span": 2, "text": "위와 같이 신청합니다.\n년 월 일\n년    윌    일", "width": 45000, "height": 6000, "para_aligns": ["Left", "Center", "Center"], "para_pt100s": [1000, 1000, 1000]},
-                        {"cell_idx": 3, "row": 2, "col": 0, "row_span": 1, "col_span": 2, "text": "신청인  주 소 :\u2028성 명 :                  \U000f012b\u2028(지급대상자와의 관계 :        )", "width": 45000, "height": 4000, "para_aligns": ["Left"], "para_pt100s": [1000]},
+                        {"cell_idx": 3, "row": 2, "col": 0, "row_span": 1, "col_span": 2, "text": "신청인  주 소 :                                 \u2028성 명 :                  \U000f012b\u2028(지급대상자와의 관계 :        )", "width": 45000, "height": 4000, "para_aligns": ["Left"], "para_pt100s": [1000]},
                     ],
                 },
             ],
@@ -1007,6 +1007,113 @@ class TestAutofillSecurityAndEngines(unittest.TestCase):
             sec_txt = zf.read("Contents/section0.xml").decode("utf-8")
             self.assertNotIn("202    .     .", sec_txt)
             self.assertIn(".", sec_txt)
+
+    def test_fix_08_priority_deceased_applicant_word_boundary(self) -> None:
+        self.assertEqual(fm.detect_section_context("신청인\n(사망인)"), "other_person")
+        self.assertEqual(fm.detect_section_context("신청인\n(지원대상자)"), "applicant")
+        self.assertEqual(fm.detect_section_context("신청인 (대출자)"), "applicant")
+        self.assertEqual(fm.detect_section_context("수급자\n(신청인)"), "applicant")
+        self.assertEqual(fm.detect_section_context("어르신\n(봉양대상자)"), "other_person")
+        self.assertEqual(fm.detect_section_context("지원계좌", current="other_person"), "other_person")
+        self.assertTrue(bool(fm.ACCOUNT_SECTION_RE.match(fm.normalize_label("지원계좌"))))
+
+    def test_fix_08_student_excluded_guardian_applicant(self) -> None:
+        doc_dump = {
+            "default_char_shape_id": 0,
+            "default_font_pt100": 1000,
+            "paragraphs": [{"section": 0, "para": 0, "text": ""}],
+            "tables": [
+                {
+                    "section": 0, "para": 0, "control": 0, "row_count": 4, "col_count": 3,
+                    "cells": [
+                        {"cell_idx": 0, "row": 0, "col": 0, "row_span": 1, "col_span": 3, "text": "교복(하복)구입비 지원신청서\n\n □ 학생 인적사항"},
+                        {"cell_idx": 1, "row": 1, "col": 0, "row_span": 1, "col_span": 1, "text": "성 명"},
+                        {"cell_idx": 2, "row": 1, "col": 1, "row_span": 1, "col_span": 2, "text": ""},
+                        {"cell_idx": 3, "row": 2, "col": 0, "row_span": 1, "col_span": 3, "text": "□ 보호자 인적사항"},
+                        {"cell_idx": 4, "row": 3, "col": 0, "row_span": 1, "col_span": 1, "text": "성 명"},
+                        {"cell_idx": 5, "row": 3, "col": 1, "row_span": 1, "col_span": 2, "text": ""},
+                    ],
+                },
+            ],
+        }
+        plan = fill_hwp_plan.plan_hwp_fills(doc_dump)
+        self.assertEqual([(e["row"], e["col"], e["value"]) for e in plan["cell_edits"]], [(3, 1, "홍길동")])
+        self.assertEqual(fm.detect_section_context("대상학생"), "other_person")
+        self.assertEqual(fm.detect_section_context("피보호자"), "other_person")
+        self.assertEqual(fm.detect_section_context("수혜아동"), "other_person")
+
+    def test_fix_08_proxy_only_proxy_fields(self) -> None:
+        doc_dump = {
+            "default_char_shape_id": 0,
+            "default_font_pt100": 1000,
+            "paragraphs": [{"section": 0, "para": 0, "text": ""}],
+            "tables": [
+                {
+                    "section": 0, "para": 0, "control": 0, "row_count": 4, "col_count": 5,
+                    "cells": [
+                        {"cell_idx": 0, "row": 0, "col": 0, "row_span": 4, "col_span": 1, "text": "대리\n수령인"},
+                        {"cell_idx": 1, "row": 0, "col": 1, "row_span": 1, "col_span": 1, "text": "성명\n(예금주)"},
+                        {"cell_idx": 2, "row": 0, "col": 2, "row_span": 1, "col_span": 1, "text": ""},
+                        {"cell_idx": 3, "row": 0, "col": 3, "row_span": 1, "col_span": 1, "text": "주민등록번호"},
+                        {"cell_idx": 4, "row": 0, "col": 4, "row_span": 1, "col_span": 1, "text": ""},
+                        {"cell_idx": 5, "row": 1, "col": 1, "row_span": 1, "col_span": 1, "text": "관계"},
+                        {"cell_idx": 6, "row": 1, "col": 2, "row_span": 1, "col_span": 1, "text": ""},
+                        {"cell_idx": 7, "row": 1, "col": 3, "row_span": 1, "col_span": 1, "text": "전화번호"},
+                        {"cell_idx": 8, "row": 1, "col": 4, "row_span": 1, "col_span": 1, "text": ""},
+                        {"cell_idx": 9, "row": 2, "col": 1, "row_span": 1, "col_span": 1, "text": "주소"},
+                        {"cell_idx": 10, "row": 2, "col": 2, "row_span": 1, "col_span": 3, "text": ""},
+                        {"cell_idx": 11, "row": 3, "col": 1, "row_span": 1, "col_span": 1, "text": "금융기관"},
+                        {"cell_idx": 12, "row": 3, "col": 2, "row_span": 1, "col_span": 1, "text": ""},
+                        {"cell_idx": 13, "row": 3, "col": 3, "row_span": 1, "col_span": 1, "text": "계좌번호"},
+                        {"cell_idx": 14, "row": 3, "col": 4, "row_span": 1, "col_span": 1, "text": ""},
+                    ],
+                },
+            ],
+        }
+        plan = fill_hwp_plan.plan_hwp_fills(doc_dump)
+        filled_map = {(e["row"], e["col"]): (e["field_key"], e["value"]) for e in plan["cell_edits"]}
+        self.assertEqual(
+            filled_map,
+            {(0, 2): ("proxy.name", "김대리"), (1, 2): ("proxy.relation", "자녀"), (1, 4): ("proxy.phone", "010-1111-1111")},
+        )
+        self.assertTrue(any(s["reason"] == "no_proxy_account_in_profile" for s in plan["report"]["skipped_fields"]))
+
+    def test_fix_08_old_new_blocks_only_new_filled(self) -> None:
+        doc_dump = {
+            "default_char_shape_id": 0,
+            "default_font_pt100": 1000,
+            "paragraphs": [{"section": 0, "para": 0, "text": ""}],
+            "tables": [
+                {
+                    "section": 0, "para": 0, "control": 0, "row_count": 2, "col_count": 4,
+                    "cells": [
+                        {"cell_idx": 0, "row": 0, "col": 0, "row_span": 2, "col_span": 1, "text": "지급계좌"},
+                        {"cell_idx": 1, "row": 0, "col": 1, "row_span": 1, "col_span": 1, "text": "현행"},
+                        {"cell_idx": 2, "row": 0, "col": 2, "row_span": 1, "col_span": 1, "text": "계좌번호"},
+                        {"cell_idx": 3, "row": 0, "col": 3, "row_span": 1, "col_span": 1, "text": ""},
+                        {"cell_idx": 4, "row": 1, "col": 1, "row_span": 1, "col_span": 1, "text": "변 경"},
+                        {"cell_idx": 5, "row": 1, "col": 2, "row_span": 1, "col_span": 1, "text": "계좌번호"},
+                        {"cell_idx": 6, "row": 1, "col": 3, "row_span": 1, "col_span": 1, "text": ""},
+                    ],
+                },
+            ],
+        }
+        plan = fill_hwp_plan.plan_hwp_fills(doc_dump)
+        self.assertEqual([(e["row"], e["col"], e["value"]) for e in plan["cell_edits"]], [(1, 3, "000-0000-0000-00")])
+
+    def test_fix_08_inline_colon_requires_slot_spaces(self) -> None:
+        doc_dump = {
+            "default_char_shape_id": 0,
+            "default_font_pt100": 1000,
+            "paragraphs": [
+                {"section": 0, "para": 0, "para_align": "Left", "font_pt100": 1000, "text": "신청인  주 소 :"},
+                {"section": 0, "para": 1, "para_align": "Left", "font_pt100": 1000, "text": "성 명 :                  \U000f012b"},
+            ],
+            "tables": [],
+        }
+        plan = fill_hwp_plan.plan_hwp_fills(doc_dump)
+        self.assertEqual([(e["para"], e["field_key"]) for e in plan["para_edits"]], [(1, "applicant.name")])
+        self.assertTrue(any(s["reason"] == "no_room" and "주 소" in s["label"] for s in plan["report"]["skipped_fields"]))
 
 
 if __name__ == "__main__":

@@ -244,7 +244,7 @@ def _plan_inline_lines(
             edits.append({"mode": "after_anchor", "anchor": pre, "orig_text": raw_seg, "new_text": new_text, "field_key": "applicant.name", "value": name})
             continue
 
-        # 3) 하단/본문 인라인 콜론 라벨 ('신청인 주 소 :', '성 명 :    ㉿', '생년월일 :')
+        # 3) 하단/본문 인라인 콜론 라벨 ('신청인 주 소 :', '성 명 :    ㉿', '생년월일 :') — 콜론 뒤 빈칸이 값 폭 이상일 때만 기입
         m_col = _INLINE_COLON_RE.match(raw_seg)
         if m_col and "관계" not in raw_seg:
             head_pre, lbl_anchor, mid_ws, sig_suf = m_col.groups()
@@ -259,11 +259,11 @@ def _plan_inline_lines(
             lbl_clean = re.sub(r"[\s:]+$", "", lbl_anchor)
             dec = fm.match_label(lbl_clean, section=eff_sec, profile=prof)
             if dec.action == "fill" and dec.value:
+                need_w = 1 + fm.display_width_spaces(dec.value) + (1 if sig_suf.strip() else 0)
+                if fm.slot_width_spaces(mid_ws) < need_w:
+                    report["skipped_fields"].append({"label": lbl_anchor.strip(), "location": location, "reason": "no_room"})
+                    continue
                 if sig_suf.strip():
-                    need_w = 1 + fm.display_width_spaces(dec.value) + 1
-                    if fm.slot_width_spaces(mid_ws) < need_w:
-                        report["skipped_fields"].append({"label": lbl_anchor.strip(), "location": location, "reason": "no_room"})
-                        continue
                     report["sensitive_blank_fields"].append({
                         "label": sig_suf.strip(), "location": location, "reason": "signature_kept_blank",
                     })
@@ -394,13 +394,23 @@ def plan_hwp_fills(doc_dump: dict[str, Any], profile: dict[str, str] | None = No
         if tbl_section not in ("excluded", "other_person", "proxy", "applicant"):
             tbl_section = "applicant"
         max_c = tbl.get("col_count", 0) or (max((c["col"] + max(1, c.get("col_span", 1)) for c in cells), default=0))
+        norm_cell_texts = [fm.normalize_label(c.get("text", "")) for c in cells if c.get("text")]
+        tbl_has_old_new = (
+            any(fm.OLD_BLOCK_HEAD_RE.match(t) for t in norm_cell_texts)
+            and any(fm.NEW_BLOCK_HEAD_RE.match(t) for t in norm_cell_texts)
+        )
         for r in range(max_r):
             row_cells = sorted(row_map.get(r, []), key=lambda x: x["col"])
             # 왼쪽 병합 구역 헤더(col 0) 및 배너 제목 행 확인
             c0_cell = grid.get((r, 0))
             if c0_cell and c0_cell.get("text"):
                 c0_norm_head = fm.normalize_label(c0_cell["text"])
-                if fm.ACCOUNT_SECTION_RE.match(c0_norm_head) and tbl_section == "other_person":
+                if (
+                    fm.ACCOUNT_SECTION_RE.match(c0_norm_head)
+                    and tbl_section in ("other_person", "proxy")
+                    and not fm.PROXY_SECTION_RE.search(c0_cell["text"])
+                    and not fm.OTHER_PERSON_SECTION_RE.search(c0_cell["text"])
+                ):
                     tbl_section = "applicant"
                 else:
                     sec = fm.detect_section_context(c0_cell["text"], current="keep")
@@ -413,9 +423,18 @@ def plan_hwp_fills(doc_dump: dict[str, Any], profile: dict[str, str] | None = No
             if is_banner_row:
                 row_joined = " ".join(rc.get("text", "") for rc in row_cells if rc.get("text"))
                 if row_joined and len(row_joined) <= 120:
-                    wsec = fm.detect_section_context(row_joined, current="keep")
-                    if wsec != "keep":
-                        tbl_section = wsec
+                    rj_norm = fm.normalize_label(row_joined)
+                    if (
+                        fm.ACCOUNT_SECTION_RE.match(rj_norm)
+                        and tbl_section in ("other_person", "proxy")
+                        and not fm.PROXY_SECTION_RE.search(row_joined)
+                        and not fm.OTHER_PERSON_SECTION_RE.search(row_joined)
+                    ):
+                        tbl_section = "applicant"
+                    else:
+                        wsec = fm.detect_section_context(row_joined, current="keep")
+                        if wsec != "keep":
+                            tbl_section = wsec
 
             c0_norm = fm.normalize_label(c0_cell.get("text", "")) if c0_cell else ""
             row_only_excluded = bool(
@@ -451,6 +470,28 @@ def plan_hwp_fills(doc_dump: dict[str, Any], profile: dict[str, str] | None = No
                         s2 = fm.detect_section_context(left_neighbor["text"], current="keep")
                         if s2 != "keep":
                             local_sec = s2
+                # 현행/변경(또는 기존/신규) 두 블록이면 현행/기존 쪽은 제외
+                if tbl_has_old_new and local_sec not in ("excluded", "other_person"):
+                    old_new_state = ""
+                    for hcol in range(0, min(4, c["col"])):
+                        hc = grid.get((r, hcol))
+                        if hc and hc.get("text"):
+                            hn = fm.normalize_label(hc["text"])
+                            if fm.OLD_BLOCK_HEAD_RE.match(hn):
+                                old_new_state = "old"
+                            elif fm.NEW_BLOCK_HEAD_RE.match(hn):
+                                old_new_state = "new"
+                    if not old_new_state:
+                        for ar in range(max(0, r - 2), r):
+                            ac = grid.get((ar, c["col"]))
+                            if ac and ac.get("text"):
+                                an = fm.normalize_label(ac["text"])
+                                if fm.OLD_BLOCK_HEAD_RE.match(an):
+                                    old_new_state = "old"
+                                elif fm.NEW_BLOCK_HEAD_RE.match(an):
+                                    old_new_state = "new"
+                    if old_new_state == "old":
+                        local_sec = "excluded"
 
                 # (a) 셀 내 인라인 날짜/서명/콜론 문단 확인
                 has_inline_cand = any(
@@ -714,7 +755,7 @@ def plan_hwp_fills(doc_dump: dict[str, Any], profile: dict[str, str] | None = No
                                         "value": app_phone,
                                         "section": local_sec,
                                     })
-                        elif re.search(r"\(전화(?:번호)?\s*:\s*\)", re.sub(r"\s{2,}", " ", ln)) and "휴대전화" not in ln:
+                        elif local_sec == "applicant" and re.search(r"\(전화(?:번호)?\s*:\s*\)", re.sub(r"\s{2,}", " ", ln)) and "휴대전화" not in ln:
                             m_ph = re.search(r"(\(전화(?:번호)?\s*:)([ \t\u00a0\u3000_]+)\)", ln)
                             if m_ph:
                                 k = (t_idx, c["cell_idx"], l_idx, "after_anchor", m_ph.group(1))

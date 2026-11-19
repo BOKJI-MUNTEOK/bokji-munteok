@@ -694,12 +694,13 @@ def _fill_inline_paragraphs(
                 eff_sec = "applicant"
             dec = fm.match_label(re.sub(r"[\s:]+$", "", lbl_anchor), section=eff_sec, profile=profile)
             if dec.action == "fill" and dec.value:
+                need_w = 1 + fm.display_width_spaces(dec.value) + (1 if sig_suf.strip() else 0)
+                if fm.slot_width_spaces(mid_ws) < need_w:
+                    report["skipped_fields"].append({
+                        "label": lbl_anchor.strip(), "location": f"{location_prefix}, p{pi}", "reason": "no_room",
+                    })
+                    continue
                 if sig_suf.strip():
-                    if fm.slot_width_spaces(mid_ws) < 1 + fm.display_width_spaces(dec.value) + 1:
-                        report["skipped_fields"].append({
-                            "label": lbl_anchor.strip(), "location": f"{location_prefix}, p{pi}", "reason": "no_room",
-                        })
-                        continue
                     report["sensitive_blank_fields"].append({
                         "label": sig_suf.strip(), "location": f"{location_prefix}, p{pi}", "reason": "signature_kept_blank",
                     })
@@ -713,7 +714,7 @@ def _fill_inline_paragraphs(
                         })
                         continue
                 ok_col, reason_col = _replace_slot_after(
-                    p_el, lbl_anchor, dec.value, leading_space=True, min_keep=1, allow_no_trim=not sig_suf.strip()
+                    p_el, lbl_anchor, dec.value, leading_space=True, min_keep=1, allow_no_trim=False
                 )
                 if ok_col:
                     report["filled_fields"].append({
@@ -796,13 +797,25 @@ def _parse_table(tbl: etree._Element) -> tuple[list[CellInfo], dict[tuple[int, i
 def _row_section_context(row_cells: list[CellInfo], grid: dict[tuple[int, int], CellInfo], r: int, current_section: str) -> str:
     c0 = grid.get((r, 0))
     if c0 and c0.text:
-        if fm.ACCOUNT_SECTION_RE.match(fm.normalize_label(c0.text)) and current_section == "other_person":
+        if (
+            fm.ACCOUNT_SECTION_RE.match(fm.normalize_label(c0.text))
+            and current_section in ("other_person", "proxy")
+            and not fm.PROXY_SECTION_RE.search(c0.text)
+            and not fm.OTHER_PERSON_SECTION_RE.search(c0.text)
+        ):
             return "applicant"
         sec = fm.detect_section_context(c0.text, current="keep")
         if sec != "keep":
             return sec
     if len(row_cells) <= 2:
         row_txt = " ".join(ci.text for ci in row_cells if ci.text)
+        if (
+            fm.ACCOUNT_SECTION_RE.match(fm.normalize_label(row_txt))
+            and current_section in ("other_person", "proxy")
+            and not fm.PROXY_SECTION_RE.search(row_txt)
+            and not fm.OTHER_PERSON_SECTION_RE.search(row_txt)
+        ):
+            return "applicant"
         sec = fm.detect_section_context(row_txt, current="keep")
         if sec != "keep":
             return sec
@@ -912,6 +925,11 @@ def fill_hwpx_bytes(
                 tbl_section = fm.detect_section_context(prev_title, current="applicant")
                 if tbl_section not in ("excluded", "other_person", "proxy", "applicant"):
                     tbl_section = "applicant"
+                norm_cell_texts = [fm.normalize_label(ci.text) for ci in cells if ci.text]
+                tbl_has_old_new = (
+                    any(fm.OLD_BLOCK_HEAD_RE.match(t) for t in norm_cell_texts)
+                    and any(fm.NEW_BLOCK_HEAD_RE.match(t) for t in norm_cell_texts)
+                )
                 for r in range(max_r):
                     row_cells = sorted(row_map.get(r, []), key=lambda x: x.col)
                     tbl_section = _row_section_context(row_cells, grid, r, tbl_section)
@@ -949,6 +967,27 @@ def fill_hwpx_bytes(
                                     s_sub = fm.detect_section_context(hc.text, current="keep")
                                     if s_sub != "keep":
                                         cur_sec = s_sub
+                        if tbl_has_old_new and cur_sec not in ("excluded", "other_person"):
+                            old_new_state = ""
+                            for hcol in range(0, min(4, ci.col)):
+                                hc = grid.get((r, hcol))
+                                if hc and hc.text:
+                                    hn = fm.normalize_label(hc.text)
+                                    if fm.OLD_BLOCK_HEAD_RE.match(hn):
+                                        old_new_state = "old"
+                                    elif fm.NEW_BLOCK_HEAD_RE.match(hn):
+                                        old_new_state = "new"
+                            if not old_new_state:
+                                for ar in range(max(0, r - 2), r):
+                                    ac = grid.get((ar, ci.col))
+                                    if ac and ac.text:
+                                        an = fm.normalize_label(ac.text)
+                                        if fm.OLD_BLOCK_HEAD_RE.match(an):
+                                            old_new_state = "old"
+                                        elif fm.NEW_BLOCK_HEAD_RE.match(an):
+                                            old_new_state = "new"
+                            if old_new_state == "old":
+                                cur_sec = "excluded"
 
                         # 단일 셀 내 인라인 서명/날짜/점날짜/하위라벨/콜론 블록 처리
                         has_inline_markers = (

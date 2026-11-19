@@ -22,17 +22,25 @@ LEDGER_TITLE_RE = re.compile(
 )
 APPROVAL_HEADER_RE = re.compile(r"(?:^|\s)결\s*재(?:\s|$)|결재란")
 
-# 다른 사람 유형 구역 (신청인 정보 기입 차단, skipped reason="other_person")
+# 1순위 사망/고인 구역 (신청인 병기라도 반드시 제외)
+DECEASED_SECTION_RE = re.compile(
+    r"사망인|사망자|(?<![가-힣])망인(?![가-힣])|(?<![가-힣])고인(?![가-힣])"
+)
+
+# 다른 사람 유형 구역 (낱말 전체 기준 매칭, skipped reason="other_person")
 OTHER_PERSON_SECTION_RE = re.compile(
-    r"출산자|임산부|산모|출생자|유족|배우자|참전유공자|국가유공자|보훈\s*대상자|사망자|"
-    r"(?<![가-힣])고인(?![가-힣])|"
-    r"(?:지원|등록|융자|수혜|보호|지급|급여|서비스)?\s*대상자(?!(?:\s*와의\s*관계|\s*와\s*관계))|"
-    r"수급\s*권자(?!(?:\s*와의\s*관계|\s*와\s*관계))|"
-    r"(?<![가-힣])아동(?![가-힣])|자녀|영유아|피보험자|가입\s*선원|권\s*유\s*자|"
+    r"(?<![가-힣])(?:"
+    r"출산자|임산부|산모|출생자|유족|배우자|참전유공자|국가유공자|"
+    r"학생|대상학생|피보호자|수혜자|수혜아동|아동|자녀|영유아|피보험자|"
     r"보증인|연대보증인|인우보증|추천인|"
-    r"세대원|세대\s*구성원|가구원|가족\s*(?:상황|사항|구성|현황)|부양\s*가족|동거\s*가족|동거인|"
-    r"(?<![가-힣])가족(?!관계증명)|부양\s*의무자|동행(?:\s*가족|\s*인)?|직계존속|"
-    r"미성년자|법정대리인|친권자|후견인|동순위\s*수급권자|대표자\s*선정"
+    r"세대원|가구원|동거인|가족(?!관계증명)|부양의무자|직계존속|"
+    r"미성년자|법정대리인|친권자|후견인|어르신"
+    r")(?![가-힣])|"
+    r"학생\s*인적사항|보훈\s*대상자|가입\s*선원|권\s*유\s*자|세대\s*구성원|"
+    r"가족\s*(?:상황|사항|구성|현황)|부양\s*가족|동거\s*가족|동행(?:\s*가족|\s*인)?|"
+    r"동순위\s*수급권자|대표자\s*선정|"
+    r"(?:지원|등록|융자|수혜|보호|지급|급여|서비스|봉양)?\s*대상자(?!(?:\s*와의\s*관계|\s*와\s*관계))|"
+    r"수급\s*권자(?!(?:\s*와의\s*관계|\s*와\s*관계))"
 )
 
 # 기입 제외 구역 (담당자, 기관·공무원, 결재, 장부·명부 등)
@@ -60,7 +68,8 @@ EXCLUDED_ROW_HEAD_RE = re.compile(
 
 # 대리인 구역
 PROXY_SECTION_RE = re.compile(
-    r"대리인|위임받는\s*사람|위임\s*받는|수임인|대신\s*신청|대리\s*신청|본인이\s*신청할\s*경우\s*생략"
+    r"대리\s*인|대리\s*수령인|대리\s*신청인|대리\s*수령|대리자|"
+    r"위임받는\s*사람|위임\s*받는|수임인|대신\s*신청|대리\s*신청|본인이\s*신청할\s*경우\s*생략"
 )
 
 # 신청인(본인) 구역 및 괄호 병기('(대리신청인)' 포함)
@@ -68,12 +77,16 @@ APPLICANT_MIXED_RE = re.compile(
     r"(?:신청인|신청자|신고인|청구인)\s*\(\s*(?:대리\s*신청인|대리인|보호자|신청인|본인|청구인)\s*\)"
 )
 APPLICANT_SECTION_RE = re.compile(
-    r"신청인|신청자|본인|신고\s*\(\s*신청\s*\)\s*인|신고인|청구인|"
+    r"신청인|신청자|본인|신고\s*\(\s*신청\s*\)\s*인|신고인|청구인|(?<!피)보호자|"
     r"위임하는\s*사람|위임한\s*사람|위임인|수급자|이용자|가입자|참여자|대출신청인|교육생"
 )
 
-# 타인 구역 뒤에서 신청인 계좌 입력으로 복귀하는 행 머리
-ACCOUNT_SECTION_RE = re.compile(r"^(?:예금|지급|수령|입금)?계좌(?:정보|번호|내역)?$")
+# 타인/대리 구역 뒤에서 신청인 계좌 입력으로 복귀하는 행 머리 & 현행/변경 쌍
+ACCOUNT_SECTION_RE = re.compile(
+    r"^(?:[가-힣]*?(?:예금|지급|수령|입금|지원))?계좌(?:변경신청내역|정보|번호|내역)?$"
+)
+OLD_BLOCK_HEAD_RE = re.compile(r"^(?:현행|기존|변경전|종전)(?:계좌|정보|내용)?$")
+NEW_BLOCK_HEAD_RE = re.compile(r"^(?:변경|신규|변경후)(?:계좌|정보|내용)?$")
 
 # 서식/대장 제목 판별
 FORM_TITLE_RE = re.compile(r"(?:신청서|신고서|청구서|동의서|요청서|서약서)(?:\s*\([^)]*\))?\s*$")
@@ -164,14 +177,17 @@ def detect_section_context(text: str, current: str = "applicant") -> str:
     ):
         return current
 
+    # 우선순위: ① 사망인/사망자/망인/고인 → ②a 신청인(대리신청인) → ②b 대리인 → ②c 신청인/보호자 → ③ 타인 유형
+    if DECEASED_SECTION_RE.search(compact_no_law) or DECEASED_SECTION_RE.search(compact_ns):
+        return "other_person"
     if APPLICANT_MIXED_RE.search(compact_for_sec) or APPLICANT_MIXED_RE.search(compact_ns):
         return "applicant"
-    if OTHER_PERSON_SECTION_RE.search(compact_no_law) or OTHER_PERSON_SECTION_RE.search(compact_ns):
-        return "other_person"
     if PROXY_SECTION_RE.search(compact_for_sec) or PROXY_SECTION_RE.search(compact_ns):
         return "proxy"
     if APPLICANT_SECTION_RE.search(compact_for_sec) or APPLICANT_SECTION_RE.search(compact_ns):
         return "applicant"
+    if OTHER_PERSON_SECTION_RE.search(compact_no_law) or OTHER_PERSON_SECTION_RE.search(compact_ns):
+        return "other_person"
     return current
 
 
@@ -352,16 +368,19 @@ def match_label(
     if NON_TARGET_LABEL_RE.search(norm):
         return MatchDecision("skip", reason="non_target_label", section=section)
 
-    # 라벨 자체에 타인 유형('출산자성명', '임산부성명' 등)이 들어 있으면 건너뜀 (관계 라벨 제외)
-    if (
-        not is_relation_lbl
-        and OTHER_PERSON_SECTION_RE.search(norm)
-        and "신청인" not in norm
-        and not norm.startswith(("본인", "신고인", "청구인", "신청자"))
-    ):
-        return MatchDecision("skip", reason="other_person", section="other_person")
+    # 라벨 자체에 사망인·타인 유형('출산자성명', '임산부성명' 등)이 들어 있으면 건너뜀 (관계 라벨 제외)
+    if not is_relation_lbl:
+        if DECEASED_SECTION_RE.search(norm):
+            return MatchDecision("skip", reason="other_person", section="other_person")
+        if (
+            OTHER_PERSON_SECTION_RE.search(norm)
+            and not APPLICANT_SECTION_RE.search(norm)
+        ):
+            return MatchDecision("skip", reason="other_person", section="other_person")
 
     eff_section = section
+    if DECEASED_SECTION_RE.search(norm):
+        return MatchDecision("skip", reason="other_person", section="other_person")
     if APPLICANT_MIXED_RE.search(label_clean):
         eff_section = "applicant"
     elif PROXY_SECTION_RE.search(label_clean):
@@ -378,23 +397,31 @@ def match_label(
             return MatchDecision("skip", reason="no_proxy_rrn_in_profile", section=eff_section)
         return _fill_or_skip(prof, "applicant.rrn", "matched_rrn", eff_section)
 
-    # 5. 계좌 관련 항목 (예금주 / 은행·금융기관 / 계좌번호 / 통합 계좌)
-    if norm in ("예금주", "예금주명", "예금주성명"):
-        return _fill_or_skip(prof, "account.holder", "matched_account_holder", eff_section)
-    if norm in ("은행명", "금융기관", "금융기관명", "거래은행", "입금은행", "은행", "은행기관명"):
-        return _fill_or_skip(prof, "account.bank", "matched_account_bank", eff_section)
-    if norm in ("계좌번호", "입금계좌번호", "수령계좌번호", "계좌", "신청인명의의계좌번호"):
-        return _fill_or_skip(prof, "account.number", "matched_account_number", eff_section)
-    if norm in ("예금계좌", "지급계좌", "수령계좌", "입금계좌", "계좌정보"):
+    # 5. 계좌 관련 항목 (예금주 / 은행·금융기관 / 계좌번호 / 통합 계좌) — 대리인 구역은 계좌 비움
+    is_holder_lbl = norm in ("예금주", "예금주명", "예금주성명") or norm.startswith("예금주신청인")
+    is_bank_lbl = norm in ("은행명", "금융기관", "금융기관명", "거래은행", "입금은행", "은행", "은행기관명")
+    is_acct_num_lbl = norm in ("계좌번호", "입금계좌번호", "수령계좌번호", "계좌", "신청인명의의계좌번호")
+    is_acct_full_lbl = norm in ("예금계좌", "지급계좌", "수령계좌", "입금계좌", "계좌정보")
+    if is_holder_lbl or is_bank_lbl or is_acct_num_lbl or is_acct_full_lbl:
+        if eff_section == "proxy":
+            return MatchDecision("skip", reason="no_proxy_account_in_profile", section=eff_section)
+        if is_holder_lbl:
+            return _fill_or_skip(prof, "account.holder", "matched_account_holder", eff_section)
+        if is_bank_lbl:
+            return _fill_or_skip(prof, "account.bank", "matched_account_bank", eff_section)
+        if is_acct_num_lbl:
+            return _fill_or_skip(prof, "account.number", "matched_account_number", eff_section)
         return _fill_or_skip(prof, "account.full", "matched_account_full", eff_section)
 
-    # 6. 월 소득 (연간소득·가구원·배우자 소득은 이미 위에서 차단)
+    # 6. 월 소득 (연간소득·가구원·배우자 소득 및 대리인 구역 차단)
     if norm in ("월평균소득", "월소득", "월소득액", "월평균소득액"):
+        if eff_section == "proxy":
+            return MatchDecision("skip", reason="no_proxy_income_in_profile", section=eff_section)
         return _fill_or_skip(prof, "applicant.income_monthly", "matched_monthly_income", eff_section)
 
     # 7. 성명
     if norm in (
-        "성명", "성명한글", "한글성명", "이름",
+        "성명", "성명한글", "한글성명", "이름", "성명예금주",
         "신청인성명", "수급자성명", "이용자성명", "가입자성명",
         "대리인성명", "위임인성명", "수임인성명", "신청자성명",
         "위임하는사람성명", "위임받는사람성명",
