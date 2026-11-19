@@ -35,16 +35,19 @@ import fill_hwp  # noqa: E402
 import fill_hwp_plan  # noqa: E402
 import fill_hwpx  # noqa: E402
 import fill_pdf  # noqa: E402
+import form_matcher as fm  # noqa: E402
 import packet  # noqa: E402
 
 
 def _make_minimal_hwpx(section_xml: bytes, extra_entries: dict[str, bytes] | None = None) -> bytes:
     buf = io.BytesIO()
+    extras = dict(extra_entries or {})
+    header_xml = extras.pop("Contents/header.xml", b"<hh:head xmlns:hh='http://www.hancom.co.kr/hwpml/2011/head'/>")
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
         zf.writestr("mimetype", b"application/hwp+zip", compress_type=zipfile.ZIP_STORED)
-        zf.writestr("Contents/header.xml", b"<hh:head xmlns:hh='http://www.hancom.co.kr/hwpml/2011/head'/>")
+        zf.writestr("Contents/header.xml", header_xml)
         zf.writestr("Contents/section0.xml", section_xml)
-        for k, v in (extra_entries or {}).items():
+        for k, v in extras.items():
             zf.writestr(k, v)
     return buf.getvalue()
 
@@ -107,7 +110,9 @@ class TestAutofillSecurityAndEngines(unittest.TestCase):
         self.assertEqual(report["filled_count"], 2)
         with zipfile.ZipFile(io.BytesIO(out_bytes), "r") as zout:
             sec_out = zout.read("Contents/section0.xml").decode("utf-8")
-        self.assertIn("2026 년 11 월 19 일", sec_out)
+        # 공백 대체 후 여백 폭을 유지하므로 1칸 이상 공백을 정규화한 문자열로 값·서명 공란 확인
+        norm_out = re.sub(r"\s+", " ", sec_out)
+        self.assertIn("2026 년 11 월 19 일", norm_out)
         self.assertIn("신청인 : 홍길동", sec_out)
         self.assertIn("(서명)", sec_out)
 
@@ -638,6 +643,210 @@ class TestAutofillSecurityAndEngines(unittest.TestCase):
                 full_text = "\n".join((pg.extract_text() or "") for pg in pdf.pages)
                 self.assertIn("직접 작성 필요", full_text)
                 self.assertIn("외부서식신청서.hwp", full_text)
+
+    def test_fix_a_inline_whitespace_trim_and_no_room(self) -> None:
+        # 1. HWPX 멀티-run 공백 치환: 전체 시각 폭이 늘어나지 않고 뒤 run의 공백만 줄어듦
+        sec_xml = (
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            '<hs:sec xmlns:hs="http://www.hancom.co.kr/hwpml/2011/section" '
+            'xmlns:hp="http://www.hancom.co.kr/hwpml/2011/paragraph">'
+            '<hp:p>'
+            '<hp:run charPrIDRef="1"><hp:t>신청인(대리 신청인) 성명 :</hp:t></hp:run>'
+            '<hp:run charPrIDRef="2"><hp:t>              </hp:t></hp:run>'
+            '<hp:run charPrIDRef="3"><hp:t> (서명 또는 인)</hp:t></hp:run>'
+            '</hp:p>'
+            '<hp:p>'
+            '<hp:run charPrIDRef="1"><hp:t>신청인(좁은 칸) 성명 :</hp:t></hp:run>'
+            '<hp:run charPrIDRef="2"><hp:t>    </hp:t></hp:run>'
+            '<hp:run charPrIDRef="3"><hp:t>(서명 또는 인)</hp:t></hp:run>'
+            '</hp:p>'
+            '</hs:sec>'
+        ).encode("utf-8")
+        out_bytes, rep = fill_hwpx.fill_hwpx_bytes(_make_minimal_hwpx(sec_xml))
+        self.assertEqual(rep["filled_count"], 1)
+        self.assertTrue(any(s["reason"] == "no_room" for s in rep["skipped_fields"]))
+        with zipfile.ZipFile(io.BytesIO(out_bytes), "r") as zin:
+            sec_out = zin.read("Contents/section0.xml").decode("utf-8")
+        # 14칸 - 7폭(' 홍길동') = 7칸 남고, 뒤 run 1칸 포함 총 8칸 유지
+        from lxml import etree as _etree
+        sec_tree = _etree.fromstring(sec_out.encode("utf-8"))
+        paras_txt = ["".join(p.xpath(".//*[local-name()='t']/text()")) for p in sec_tree.xpath(".//*[local-name()='p']")]
+        self.assertEqual(paras_txt[0], "신청인(대리 신청인) 성명 : 홍길동        (서명 또는 인)")
+        self.assertEqual(paras_txt[1], "신청인(좁은 칸) 성명 :    (서명 또는 인)")
+
+        # 2. HWP 계획기 좁은 날짜/서명 줄은 skipped: no_room
+        doc_dump = {
+            "paragraphs": [
+                {"section": 0, "para": 0, "text": "위와 같이 신청합니다."},
+                {"section": 0, "para": 1, "text": "20 년 월 일"},
+                {"section": 0, "para": 2, "text": "신청인 :    (서명)"},
+            ],
+            "tables": [],
+        }
+        plan = fill_hwp_plan.plan_hwp_fills(doc_dump)
+        self.assertEqual(plan["para_edits"], [])
+        reasons = [s["reason"] for s in plan["report"]["skipped_fields"]]
+        self.assertGreaterEqual(reasons.count("no_room"), 2)
+
+    def test_fix_b_tiny_font_fallback_and_skip(self) -> None:
+        hdr_mixed = (
+            '<hh:head xmlns:hh="http://www.hancom.co.kr/hwpml/2011/head">'
+            '<hh:charPr id="1" height="900"/>'
+            '<hh:charPr id="2" height="100"/>'
+            '</hh:head>'
+        ).encode("utf-8")
+        hdr_tiny_only = (
+            '<hh:head xmlns:hh="http://www.hancom.co.kr/hwpml/2011/head">'
+            '<hh:charPr id="1" height="100"/>'
+            '<hh:charPr id="2" height="100"/>'
+            '</hh:head>'
+        ).encode("utf-8")
+        tbl_sec = (
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            '<hs:sec xmlns:hs="http://www.hancom.co.kr/hwpml/2011/section" '
+            'xmlns:hp="http://www.hancom.co.kr/hwpml/2011/paragraph">'
+            '<hp:p><hp:run><hp:tbl>'
+            '<hp:tr>'
+            '<hp:tc><hp:cellAddr colAddr="0" rowAddr="0"/><hp:cellSpan colSpan="1" rowSpan="1"/>'
+            '<hp:subList><hp:p><hp:run charPrIDRef="1"><hp:t>금융기관명</hp:t></hp:run></hp:p></hp:subList></hp:tc>'
+            '</hp:tr>'
+            '<hp:tr>'
+            '<hp:tc><hp:cellAddr colAddr="0" rowAddr="1"/><hp:cellSpan colSpan="1" rowSpan="1"/>'
+            '<hp:subList><hp:p><hp:run charPrIDRef="2"><hp:t></hp:t></hp:run></hp:p></hp:subList></hp:tc>'
+            '</hp:tr>'
+            '</hp:tbl></hp:run></hp:p></hs:sec>'
+        ).encode("utf-8")
+
+        raw_ok = _make_minimal_hwpx(tbl_sec, {"Contents/header.xml": hdr_mixed})
+        out_ok, rep_ok = fill_hwpx.fill_hwpx_bytes(raw_ok)
+        self.assertEqual(rep_ok["filled_count"], 1)
+        with zipfile.ZipFile(io.BytesIO(out_ok), "r") as zin:
+            sec_xml = zin.read("Contents/section0.xml").decode("utf-8")
+        self.assertIn('charPrIDRef="1"><hp:t>농협</hp:t>', sec_xml)
+
+        raw_skip = _make_minimal_hwpx(tbl_sec, {"Contents/header.xml": hdr_tiny_only})
+        out_skip, rep_skip = fill_hwpx.fill_hwpx_bytes(raw_skip)
+        self.assertEqual(out_skip, raw_skip)
+        self.assertEqual(rep_skip["filled_count"], 0)
+        self.assertTrue(any(s["reason"] == "tiny_font" for s in rep_skip["skipped_fields"]))
+
+        # HWP 계획기도 7pt(700) 미만 대상 셀에서 override_char_shape_id 또는 tiny_font 차단 동작
+        dump_hwp = {
+            "default_char_shape_id": 1,
+            "default_font_pt100": 900,
+            "paragraphs": [],
+            "tables": [{
+                "section": 0, "para": 0, "control": 0, "row_count": 2, "col_count": 1,
+                "cells": [
+                    {"cell_idx": 0, "row": 0, "col": 0, "row_span": 1, "col_span": 1, "char_shape_id": 1, "font_pt100": 900, "text": "금융기관명"},
+                    {"cell_idx": 1, "row": 1, "col": 0, "row_span": 1, "col_span": 1, "char_shape_id": 2, "font_pt100": 100, "text": ""},
+                ],
+            }],
+        }
+        plan_hwp = fill_hwp_plan.plan_hwp_fills(dump_hwp)
+        self.assertEqual(plan_hwp["cell_edits"][0].get("override_char_shape_id"), 1)
+        dump_hwp_tiny = {
+            "default_char_shape_id": -1,
+            "default_font_pt100": 0,
+            "paragraphs": [],
+            "tables": [{
+                "section": 0, "para": 0, "control": 0, "row_count": 2, "col_count": 1,
+                "cells": [
+                    {"cell_idx": 0, "row": 0, "col": 0, "row_span": 1, "col_span": 1, "char_shape_id": 2, "font_pt100": 100, "text": "금융기관명"},
+                    {"cell_idx": 1, "row": 1, "col": 0, "row_span": 1, "col_span": 1, "char_shape_id": 2, "font_pt100": 100, "text": ""},
+                ],
+            }],
+        }
+        plan_skip = fill_hwp_plan.plan_hwp_fills(dump_hwp_tiny)
+        self.assertEqual(plan_skip["cell_edits"], [])
+        self.assertTrue(any(s["reason"] == "tiny_font" for s in plan_skip["report"]["skipped_fields"]))
+
+    def test_fix_c_agency_and_official_section_excluded(self) -> None:
+        sec_xml = (
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            '<hs:sec xmlns:hs="http://www.hancom.co.kr/hwpml/2011/section" '
+            'xmlns:hp="http://www.hancom.co.kr/hwpml/2011/paragraph">'
+            '<hp:p><hp:run><hp:tbl>'
+            '<hp:tr>'
+            '<hp:tc><hp:cellAddr colAddr="0" rowAddr="0"/><hp:cellSpan colSpan="1" rowSpan="1"/><hp:subList><hp:p><hp:run><hp:t>처리기간</hp:t></hp:run></hp:p></hp:subList></hp:tc>'
+            '<hp:tc><hp:cellAddr colAddr="1" rowAddr="0"/><hp:cellSpan colSpan="2" rowSpan="1"/><hp:subList><hp:p><hp:run><hp:t>14일</hp:t></hp:run></hp:p></hp:subList></hp:tc>'
+            '</hp:tr>'
+            '<hp:tr>'
+            '<hp:tc><hp:cellAddr colAddr="0" rowAddr="1"/><hp:cellSpan colSpan="1" rowSpan="1"/><hp:subList><hp:p><hp:run><hp:t>신청인</hp:t></hp:run></hp:p></hp:subList></hp:tc>'
+            '<hp:tc><hp:cellAddr colAddr="1" rowAddr="1"/><hp:cellSpan colSpan="1" rowSpan="1"/><hp:subList><hp:p><hp:run><hp:t>성명</hp:t></hp:run></hp:p></hp:subList></hp:tc>'
+            '<hp:tc><hp:cellAddr colAddr="2" rowAddr="1"/><hp:cellSpan colSpan="1" rowSpan="1"/><hp:subList><hp:p><hp:run><hp:t></hp:t></hp:run></hp:p></hp:subList></hp:tc>'
+            '</hp:tr>'
+            '<hp:tr>'
+            '<hp:tc><hp:cellAddr colAddr="0" rowAddr="2"/><hp:cellSpan colSpan="1" rowSpan="1"/><hp:subList><hp:p><hp:run><hp:t>요양기관</hp:t></hp:run></hp:p></hp:subList></hp:tc>'
+            '<hp:tc><hp:cellAddr colAddr="1" rowAddr="2"/><hp:cellSpan colSpan="1" rowSpan="1"/><hp:subList><hp:p><hp:run><hp:t>전화번호</hp:t></hp:run></hp:p></hp:subList></hp:tc>'
+            '<hp:tc><hp:cellAddr colAddr="2" rowAddr="2"/><hp:cellSpan colSpan="1" rowSpan="1"/><hp:subList><hp:p><hp:run><hp:t></hp:t></hp:run></hp:p></hp:subList></hp:tc>'
+            '</hp:tr>'
+            '<hp:tr>'
+            '<hp:tc><hp:cellAddr colAddr="0" rowAddr="3"/><hp:cellSpan colSpan="1" rowSpan="1"/><hp:subList><hp:p><hp:run><hp:t>읍ㆍ면장 확인</hp:t></hp:run></hp:p></hp:subList></hp:tc>'
+            '<hp:tc><hp:cellAddr colAddr="1" rowAddr="3"/><hp:cellSpan colSpan="2" rowSpan="1"/><hp:subList>'
+            '<hp:p><hp:run><hp:t>확인자 : 성명         (서명)</hp:t></hp:run></hp:p>'
+            '<hp:p><hp:run><hp:t>        년      월      일</hp:t></hp:run></hp:p>'
+            '</hp:subList></hp:tc>'
+            '</hp:tr>'
+            '</hp:tbl></hp:run></hp:p>'
+            '<hp:p><hp:run><hp:t>20    년      월      일</hp:t></hp:run></hp:p>'
+            '<hp:p><hp:run><hp:t>1차 확인자 : 활동보조인 성명 :       (서명 또는 인)</hp:t></hp:run></hp:p>'
+            '</hs:sec>'
+        ).encode("utf-8")
+        _, rep = fill_hwpx.fill_hwpx_bytes(_make_minimal_hwpx(sec_xml))
+        # 처리기간 뒤 신청인 성명 1칸만 채워지고, 요양기관 전화번호·읍면장 확인 날짜·본문 1차 확인자 날짜는 모두 제외되어야 함
+        self.assertEqual(rep["filled_count"], 1)
+        self.assertEqual(rep["filled_fields"][0]["field_key"], "applicant.name")
+        self.assertTrue(any(s["reason"] == "excluded_section" for s in rep["skipped_fields"]))
+
+    def test_fix_d_coheir_gender_split_and_guarantor_excluded(self) -> None:
+        doc_dump = {
+            "paragraphs": [
+                {"section": 0, "para": 0, "text": "효드림수당 지급대상자 명부"},
+            ],
+            "tables": [
+                {
+                    "section": 0, "para": 0, "control": 0, "row_count": 2, "col_count": 2,
+                    "cells": [
+                        {"cell_idx": 0, "row": 0, "col": 0, "row_span": 1, "col_span": 1, "text": "성명"},
+                        {"cell_idx": 1, "row": 0, "col": 1, "row_span": 1, "col_span": 1, "text": "주 소"},
+                        {"cell_idx": 2, "row": 1, "col": 0, "row_span": 1, "col_span": 1, "text": ""},
+                        {"cell_idx": 3, "row": 1, "col": 1, "row_span": 1, "col_span": 1, "text": ""},
+                    ],
+                },
+                {
+                    "section": 0, "para": 1, "control": 0, "row_count": 5, "col_count": 3,
+                    "cells": [
+                        {"cell_idx": 0, "row": 0, "col": 0, "row_span": 2, "col_span": 1, "text": "동순위수급권자"},
+                        {"cell_idx": 1, "row": 0, "col": 1, "row_span": 1, "col_span": 1, "text": "성명"},
+                        {"cell_idx": 2, "row": 0, "col": 2, "row_span": 1, "col_span": 1, "text": "대표자 선정"},
+                        {"cell_idx": 3, "row": 1, "col": 1, "row_span": 1, "col_span": 1, "text": ""},
+                        {"cell_idx": 4, "row": 1, "col": 2, "row_span": 1, "col_span": 1, "text": ""},
+                        {"cell_idx": 5, "row": 2, "col": 0, "row_span": 1, "col_span": 1, "text": "성명(여성)"},
+                        {"cell_idx": 6, "row": 2, "col": 1, "row_span": 1, "col_span": 1, "text": "생년월일"},
+                        {"cell_idx": 7, "row": 2, "col": 2, "row_span": 1, "col_span": 1, "text": ""},
+                        {"cell_idx": 8, "row": 3, "col": 0, "row_span": 1, "col_span": 1, "text": "관 계"},
+                        {"cell_idx": 9, "row": 3, "col": 1, "row_span": 1, "col_span": 1, "text": "성 명"},
+                        {"cell_idx": 10, "row": 4, "col": 0, "row_span": 1, "col_span": 1, "text": "여성"},
+                        {"cell_idx": 11, "row": 4, "col": 1, "row_span": 1, "col_span": 1, "text": ""},
+                    ],
+                },
+                {
+                    "section": 0, "para": 2, "control": 0, "row_count": 2, "col_count": 1,
+                    "cells": [
+                        {"cell_idx": 0, "row": 0, "col": 0, "row_span": 1, "col_span": 1, "text": "인 우 보 증 서"},
+                        {"cell_idx": 1, "row": 1, "col": 0, "row_span": 1, "col_span": 1, "text": "위의 사실을 확인하며 보증합니다.\n20   년      월      일"},
+                    ],
+                },
+            ],
+        }
+        plan = fill_hwp_plan.plan_hwp_fills(doc_dump)
+        self.assertEqual(plan["cell_edits"], [])
+        self.assertEqual(plan["para_edits"], [])
+        self.assertTrue(any(s["reason"] == "excluded_section" for s in plan["report"]["skipped_fields"]))
+        # '신고인'이 '고인'으로 오인되어 제외되지 않는지 확인
+        self.assertEqual(fm.detect_section_context("신고인(신청인)"), "applicant")
+        self.assertEqual(fm.detect_section_context("사망한 고인 성명"), "excluded")
 
 
 if __name__ == "__main__":

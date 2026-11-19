@@ -104,9 +104,47 @@ public class HwpLibTool {
         return sb.toString();
     }
 
+    private static int paraCharShapeId(Paragraph p) {
+        if (p != null && p.getCharShape() != null && !p.getCharShape().getPositonShapeIdPairList().isEmpty()) {
+            return (int) p.getCharShape().getPositonShapeIdPairList().get(0).getShapeId();
+        }
+        return -1;
+    }
+
+    private static int fontPt100(HWPFile hwp, int shapeId) {
+        var csList = hwp.getDocInfo().getCharShapeList();
+        if (shapeId >= 0 && shapeId < csList.size()) {
+            return csList.get(shapeId).getBaseSize();
+        }
+        return 1000;
+    }
+
     private static String inspectToJson(HWPFile hwp) {
+        var csList = hwp.getDocInfo().getCharShapeList();
+        int defaultShapeId = -1;
+        int defaultFontPt100 = 0;
+        int fallbackShapeId = -1;
+        int fallbackFontPt100 = 0;
+        for (int i = 0; i < csList.size(); i++) {
+            int sz = csList.get(i).getBaseSize();
+            if (defaultShapeId < 0 && sz >= 800 && sz <= 1100) {
+                defaultShapeId = i;
+                defaultFontPt100 = sz;
+            }
+            if (fallbackShapeId < 0 && sz >= 700) {
+                fallbackShapeId = i;
+                fallbackFontPt100 = sz;
+            }
+        }
+        if (defaultShapeId < 0) {
+            defaultShapeId = fallbackShapeId;
+            defaultFontPt100 = fallbackFontPt100;
+        }
+
         StringBuilder sb = new StringBuilder(4096);
-        sb.append("{\"paragraphs\":[");
+        sb.append("{\"default_char_shape_id\":").append(defaultShapeId)
+          .append(",\"default_font_pt100\":").append(defaultFontPt100)
+          .append(",\"paragraphs\":[");
         boolean firstPara = true;
         List<Map<String, Object>> tableEntries = new ArrayList<>();
 
@@ -115,10 +153,14 @@ public class HwpLibTool {
             Section sec = sections.get(sIdx);
             for (int pIdx = 0; pIdx < sec.getParagraphCount(); pIdx++) {
                 Paragraph p = sec.getParagraph(pIdx);
+                int pShape = paraCharShapeId(p);
+                int pPt = fontPt100(hwp, pShape);
                 if (!firstPara) sb.append(',');
                 firstPara = false;
                 sb.append("{\"section\":").append(sIdx)
                   .append(",\"para\":").append(pIdx)
+                  .append(",\"char_shape_id\":").append(pShape)
+                  .append(",\"font_pt100\":").append(pPt)
                   .append(",\"text\":").append(jsonEscape(safeParaString(p))).append('}');
 
                 if (p.getControlList() != null) {
@@ -155,6 +197,9 @@ public class HwpLibTool {
             for (Row r : ct.getRowList()) {
                 for (Cell cell : r.getCellList()) {
                     var lh = cell.getListHeader();
+                    var pl = cell.getParagraphList();
+                    int cShape = pl.getParagraphCount() > 0 ? paraCharShapeId(pl.getParagraph(0)) : -1;
+                    int cPt = fontPt100(hwp, cShape);
                     if (!firstCell) sb.append(',');
                     firstCell = false;
                     sb.append("{\"cell_idx\":").append(cellSeq++)
@@ -162,6 +207,8 @@ public class HwpLibTool {
                       .append(",\"col\":").append(lh.getColIndex())
                       .append(",\"row_span\":").append(lh.getRowSpan())
                       .append(",\"col_span\":").append(lh.getColSpan())
+                      .append(",\"char_shape_id\":").append(cShape)
+                      .append(",\"font_pt100\":").append(cPt)
                       .append(",\"text\":").append(jsonEscape(cellJoinedText(cell))).append('}');
                 }
             }
@@ -188,6 +235,7 @@ public class HwpLibTool {
                 String anchor = asStr(ed.get("anchor"));
                 String value = asStr(ed.get("value"));
                 if (value.isEmpty()) value = asStr(ed.get("new_text"));
+                int overrideShapeId = ed.get("override_char_shape_id") instanceof Number n ? n.intValue() : -1;
 
                 if (tIdx < 0 || tIdx >= tables.size()) continue;
                 Cell cell = findCell(tables.get(tIdx), row, col);
@@ -198,7 +246,9 @@ public class HwpLibTool {
                     continue;
                 }
                 if (cpIdx < 0 || cpIdx >= plist.getParagraphCount()) continue;
-                if (applyParaEdit(plist.getParagraph(cpIdx), mode, anchor, value)) {
+                Paragraph targetP = plist.getParagraph(cpIdx);
+                if (applyParaEdit(targetP, mode, anchor, value)) {
+                    applyCharShapeOverride(hwp, targetP, overrideShapeId);
                     applied++;
                 }
             }
@@ -214,17 +264,40 @@ public class HwpLibTool {
                 String anchor = asStr(ed.get("anchor"));
                 String value = asStr(ed.get("value"));
                 if (value.isEmpty()) value = asStr(ed.get("new_text"));
+                int overrideShapeId = ed.get("override_char_shape_id") instanceof Number n ? n.intValue() : -1;
 
                 var secs = hwp.getBodyText().getSectionList();
                 if (secIdx < 0 || secIdx >= secs.size()) continue;
                 Section sec = secs.get(secIdx);
                 if (pIdx < 0 || pIdx >= sec.getParagraphCount()) continue;
-                if (applyParaEdit(sec.getParagraph(pIdx), mode, anchor, value)) {
+                Paragraph targetP = sec.getParagraph(pIdx);
+                if (applyParaEdit(targetP, mode, anchor, value)) {
+                    applyCharShapeOverride(hwp, targetP, overrideShapeId);
                     applied++;
                 }
             }
         }
         return applied;
+    }
+
+    private static void applyCharShapeOverride(HWPFile hwp, Paragraph p, int overrideShapeId) {
+        if (overrideShapeId < 0) return;
+        var csList = hwp.getDocInfo().getCharShapeList();
+        if (overrideShapeId >= csList.size()) return;
+        p.deleteCharShape();
+        p.createCharShape();
+        p.getCharShape().addParaCharShape(0, overrideShapeId);
+        p.getHeader().setCharShapeCount(1);
+        int newSz = csList.get(overrideShapeId).getBaseSize();
+        if (p.getLineSeg() != null && !p.getLineSeg().getLineSegItemList().isEmpty()) {
+            for (LineSegItem item : p.getLineSeg().getLineSegItemList()) {
+                if (item.getLineHeight() < newSz) {
+                    item.setLineHeight(newSz);
+                    item.setTextPartHeight(newSz);
+                    item.setDistanceBaseLineToLineVerticalPosition((int) (newSz * 0.85));
+                }
+            }
+        }
     }
 
     private static List<ControlTable> collectTables(HWPFile hwp) {
@@ -315,20 +388,61 @@ public class HwpLibTool {
         return findNormalEndIndex(pt);
     }
 
-    private static void trimFollowingAsciiSpaces(ParaText pt, int startIdx, int maxTrim, int minKeep) {
+    private static int displayWidthSpaces(String s) {
+        int w = 0;
+        for (int i = 0; i < s.length(); i++) {
+            w += s.charAt(i) > 0x7F ? 2 : 1;
+        }
+        return w;
+    }
+
+    private static int slotCharWidth(HWPChar ch) {
+        if (ch.getType() != HWPCharType.Normal) return 0;
+        int code = ((HWPCharNormal) ch).getCode();
+        if (code == 0x3000) return 2;
+        if (code == 32 || code == 95 || code == 160) return 1;
+        return 0;
+    }
+
+    private static int measureSlotWidthAfter(ParaText pt, int startIdx) {
         ArrayList<HWPChar> chars = pt.getCharList();
-        int count = 0;
-        for (int i = startIdx; i < chars.size(); i++) {
-            HWPChar ch = chars.get(i);
-            if (ch.getType() == HWPCharType.Normal && ((HWPCharNormal) ch).getCode() == 32) {
-                count++;
-            } else {
+        int w = 0;
+        for (int i = Math.max(0, startIdx); i < chars.size(); i++) {
+            int cw = slotCharWidth(chars.get(i));
+            if (cw == 0) break;
+            w += cw;
+        }
+        return w;
+    }
+
+    private static void trimSlotCharsAfter(ParaText pt, int startIdx, int targetWidth, int minKeepWidth) {
+        int avail = measureSlotWidthAfter(pt, startIdx);
+        ArrayList<HWPChar> chars = pt.getCharList();
+        int trimmed = 0;
+        int toRemove = 0;
+        for (int i = Math.max(0, startIdx); i < chars.size(); i++) {
+            int cw = slotCharWidth(chars.get(i));
+            if (cw == 0 || trimmed >= targetWidth || (avail - (trimmed + cw)) < minKeepWidth) {
                 break;
             }
+            trimmed += cw;
+            toRemove++;
         }
-        int toRemove = Math.min(Math.max(0, count - minKeep), maxTrim);
         for (int k = 0; k < toRemove; k++) {
             chars.remove(startIdx);
+        }
+    }
+
+    private static void trimLeadingSpacesBefore(ParaText pt, int endIdx, int targetWidth) {
+        ArrayList<HWPChar> chars = pt.getCharList();
+        int idx = Math.min(endIdx, chars.size()) - 1;
+        int trimmed = 0;
+        while (idx >= 0 && trimmed < targetWidth) {
+            int cw = slotCharWidth(chars.get(idx));
+            if (cw == 0) break;
+            chars.remove(idx);
+            trimmed += cw;
+            idx--;
         }
     }
 
@@ -387,13 +501,11 @@ public class HwpLibTool {
             ok = true;
         } else if ("prepend_trim_spaces".equals(mode)) {
             int idx = findFirstInsertIndex(pt);
-            boolean hasLeadingSpaces = idx < pt.getCharList().size()
-                && pt.getCharList().get(idx).getType() == HWPCharType.Normal
-                && ((HWPCharNormal) pt.getCharList().get(idx)).getCode() == 32;
-            String ins = hasLeadingSpaces ? value : (value + "   ");
+            boolean hasLeadingSlots = idx < pt.getCharList().size() && slotCharWidth(pt.getCharList().get(idx)) > 0;
+            String ins = hasLeadingSlots ? value : (value + "   ");
             pt.insertString(idx, ins);
-            if (hasLeadingSpaces) {
-                trimFollowingAsciiSpaces(pt, idx + ins.length(), value.length(), 3);
+            if (hasLeadingSlots) {
+                trimSlotCharsAfter(pt, idx + ins.length(), displayWidthSpaces(ins), 1);
             }
             ok = true;
         } else if ("after_anchor".equals(mode) && !anchor.isEmpty()) {
@@ -401,7 +513,7 @@ public class HwpLibTool {
             if (idx >= 0) {
                 String ins = " " + value;
                 pt.insertString(idx, ins);
-                trimFollowingAsciiSpaces(pt, idx + ins.length(), value.length() + 1, 2);
+                trimSlotCharsAfter(pt, idx + ins.length(), displayWidthSpaces(ins), 1);
                 ok = true;
             }
         } else if ("date".equals(mode)) {
@@ -412,12 +524,25 @@ public class HwpLibTool {
                 int idxYEnd = findCharIndexOfSubstringEnd(pt, "년");
                 int idxYStart = findCharIndexOfSubstringStart(pt, "년");
                 if (idxM >= 0 && idxYEnd >= 0 && idxYStart >= 0) {
-                    pt.insertString(idxM, " " + dy);
-                    trimFollowingAsciiSpaces(pt, idxM + 1 + dy.length(), dy.length() + 1, 2);
-                    pt.insertString(idxYEnd, " " + mo);
-                    trimFollowingAsciiSpaces(pt, idxYEnd + 1 + mo.length(), mo.length() + 1, 2);
-                    pt.insertString(idxYStart, yr);
-                    ok = true;
+                    int availMd = measureSlotWidthAfter(pt, idxM);
+                    String insD = (availMd >= dy.length() + 2) ? (" " + dy) : dy;
+                    pt.insertString(idxM, insD);
+                    trimSlotCharsAfter(pt, idxM + insD.length(), displayWidthSpaces(insD), 1);
+
+                    int availYm = measureSlotWidthAfter(pt, idxYEnd);
+                    String insM = (availYm >= mo.length() + 2) ? (" " + mo) : mo;
+                    pt.insertString(idxYEnd, insM);
+                    trimSlotCharsAfter(pt, idxYEnd + insM.length(), displayWidthSpaces(insM), 1);
+
+                    idxYStart = findCharIndexOfSubstringStart(pt, "년");
+                    if (idxYStart >= 0) {
+                        trimLeadingSpacesBefore(pt, idxYStart, yr.length());
+                        idxYStart = findCharIndexOfSubstringStart(pt, "년");
+                        if (idxYStart >= 0) {
+                            pt.insertString(idxYStart, yr);
+                            ok = true;
+                        }
+                    }
                 }
             }
         } else if ("date20".equals(mode)) {
@@ -428,12 +553,18 @@ public class HwpLibTool {
                 int idxYEnd = findCharIndexOfSubstringEnd(pt, "년");
                 int idx20End = findCharIndexOfSubstringEnd(pt, "20");
                 if (idxM >= 0 && idxYEnd >= 0 && idx20End >= 0) {
-                    pt.insertString(idxM, " " + dy);
-                    trimFollowingAsciiSpaces(pt, idxM + 1 + dy.length(), dy.length() + 1, 1);
-                    pt.insertString(idxYEnd, " " + mo);
-                    trimFollowingAsciiSpaces(pt, idxYEnd + 1 + mo.length(), mo.length() + 1, 1);
+                    int availMd = measureSlotWidthAfter(pt, idxM);
+                    String insD = (availMd >= dy.length() + 2) ? (" " + dy) : dy;
+                    pt.insertString(idxM, insD);
+                    trimSlotCharsAfter(pt, idxM + insD.length(), displayWidthSpaces(insD), 1);
+
+                    int availYm = measureSlotWidthAfter(pt, idxYEnd);
+                    String insM = (availYm >= mo.length() + 2) ? (" " + mo) : mo;
+                    pt.insertString(idxYEnd, insM);
+                    trimSlotCharsAfter(pt, idxYEnd + insM.length(), displayWidthSpaces(insM), 1);
+
                     pt.insertString(idx20End, yr2);
-                    trimFollowingAsciiSpaces(pt, idx20End + yr2.length(), yr2.length(), 1);
+                    trimSlotCharsAfter(pt, idx20End + yr2.length(), displayWidthSpaces(yr2), 1);
                     ok = true;
                 }
             }

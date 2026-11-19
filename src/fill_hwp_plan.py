@@ -19,6 +19,27 @@ _NON_APP_DATE_RE = re.compile(
 )
 
 
+def _resolve_font_override(
+    target_c: dict[str, Any],
+    label_c: dict[str, Any] | None,
+    doc_dump: dict[str, Any],
+) -> tuple[bool, int]:
+    """기입할 셀 글자 크기가 7pt(700) 미만이면 라벨 셀/문서 기본 글자 모양으로 교체하거나 건너뛴다."""
+    if "font_pt100" not in target_c:
+        return True, -1
+    if int(target_c.get("font_pt100") or 0) >= 700:
+        return True, -1
+    if label_c is not None and int(label_c.get("font_pt100") or 0) >= 700:
+        lbl_sid = int(label_c.get("char_shape_id", -1))
+        if lbl_sid >= 0:
+            return True, lbl_sid
+    if int(doc_dump.get("default_font_pt100") or 0) >= 700:
+        def_sid = int(doc_dump.get("default_char_shape_id", -1))
+        if def_sid >= 0:
+            return True, def_sid
+    return False, -1
+
+
 def _plan_inline_line(
     raw: str,
     prev_ctx: str,
@@ -28,6 +49,7 @@ def _plan_inline_line(
     report: dict[str, Any],
     section: str = "applicant",
     direct_ctx: str = "",
+    is_body: bool = False,
 ) -> dict[str, Any] | None:
     stripped = re.sub(r"\s+", " ", raw).strip()
     if not stripped:
@@ -39,11 +61,14 @@ def _plan_inline_line(
         if _NON_APP_DATE_RE.search(bad_target):
             report["skipped_fields"].append({"label": stripped, "location": location, "reason": "non_application_date_context"})
             return None
+        if fm.OFFICIAL_INLINE_CTX_RE.search(prev_ctx + " " + next_ctx + " " + direct_ctx):
+            report["skipped_fields"].append({"label": stripped, "location": location, "reason": "excluded_section"})
+            return None
         if not any(ok in (prev_ctx + " " + next_ctx) for ok in ("신청", "동의", "확인", "신고", "서명")):
             report["skipped_fields"].append({"label": stripped, "location": location, "reason": "unverified_date_context"})
             return None
-        m_20 = re.match(r"^(\s*20)(\s+)(년)(\s+)(월)(\s+)(일\s*)$", raw)
-        m_plain = re.match(r"^(\s*)(년)(\s+)(월)(\s+)(일\s*)$", raw)
+        m_20 = re.match(r"^(\s*20)([ \t\u00a0\u3000_]+)(년)([ \t\u00a0\u3000_]+)(월)([ \t\u00a0\u3000_]+)(일\s*)$", raw)
+        m_plain = re.match(r"^([ \t\u00a0\u3000_]*)(년)([ \t\u00a0\u3000_]+)(월)([ \t\u00a0\u3000_]+)(일\s*)$", raw)
         date_parts = re.findall(r"\d+", prof.get("apply_date") or "")
         if len(date_parts) < 3:
             return None
@@ -52,9 +77,16 @@ def _plan_inline_line(
         if m_20:
             yr2 = yr[-2:]
             lead20, sp_20y, s_y, sp_ym, s_m, sp_md, s_d = m_20.groups()
+            if (
+                fm.slot_width_spaces(sp_20y) < len(yr2) + 1
+                or fm.slot_width_spaces(sp_ym) < len(mo) + 1
+                or fm.slot_width_spaces(sp_md) < len(dy) + 1
+            ):
+                report["skipped_fields"].append({"label": stripped, "location": location, "reason": "no_room"})
+                return None
             sp_20y2 = " " * max(1, len(sp_20y) - len(yr2))
-            sp_ym2 = (" " + mo + " " * max(1, len(sp_ym) - len(mo) - 1)) if len(sp_ym) >= len(mo) + 2 else (" " + mo + " ")
-            sp_md2 = (" " + dy + " " * max(1, len(sp_md) - len(dy) - 1)) if len(sp_md) >= len(dy) + 2 else (" " + dy + " ")
+            sp_ym2 = (" " + mo + " " * max(1, len(sp_ym) - len(mo) - 1)) if len(sp_ym) >= len(mo) + 2 else (mo + " ")
+            sp_md2 = (" " + dy + " " * max(1, len(sp_md) - len(dy) - 1)) if len(sp_md) >= len(dy) + 2 else (dy + " ")
             new_text = f"{lead20}{yr2}{sp_20y2}{s_y}{sp_ym2}{s_m}{sp_md2}{s_d}"
             report["filled_fields"].append({
                 "label": stripped, "location": location, "field_key": "apply_date",
@@ -63,10 +95,17 @@ def _plan_inline_line(
             return {"mode": "date20", "orig_text": raw, "new_text": new_text, "field_key": "apply_date", "value": apply_date_val}
         if m_plain:
             lead, s_y, sp_ym, s_m, sp_md, s_d = m_plain.groups()
-            trim = min(max(0, len(lead) - 2), len(yr) + len(mo) + len(dy) + 2)
+            if (
+                fm.slot_width_spaces(sp_ym) < len(mo) + 1
+                or fm.slot_width_spaces(sp_md) < len(dy) + 1
+                or (is_body and 0 < fm.slot_width_spaces(lead) < len(yr))
+            ):
+                report["skipped_fields"].append({"label": stripped, "location": location, "reason": "no_room"})
+                return None
+            trim = min(len(lead), len(yr))
             lead2 = lead[:-trim] if trim else lead
-            sp_ym2 = (" " + mo + " " * max(1, len(sp_ym) - len(mo) - 1)) if len(sp_ym) >= len(mo) + 2 else (" " + mo + " ")
-            sp_md2 = (" " + dy + " " * max(1, len(sp_md) - len(dy) - 1)) if len(sp_md) >= len(dy) + 2 else (" " + dy + " ")
+            sp_ym2 = (" " + mo + " " * max(1, len(sp_ym) - len(mo) - 1)) if len(sp_ym) >= len(mo) + 2 else (mo + " ")
+            sp_md2 = (" " + dy + " " * max(1, len(sp_md) - len(dy) - 1)) if len(sp_md) >= len(dy) + 2 else (dy + " ")
             new_text = f"{lead2}{yr}{s_y}{sp_ym2}{s_m}{sp_md2}{s_d}"
             report["filled_fields"].append({
                 "label": stripped, "location": location, "field_key": "apply_date",
@@ -77,23 +116,31 @@ def _plan_inline_line(
 
     # 2) 인라인 성명 + 서명 줄 ('신청인 :     (서명 또는 인)' / '성 명:    (서명 또는 인)' / '신청인      (서명 또는 인)')
     m_sig = re.match(
-        r"^(\s*(?:신\s*청\s*인|보험가입신고\(신청\)인|성\s*명|이\s*름)(?:\([^)]*\))*\s*:?)(\s{6,})(\(서명(?:\s*또는\s*(?:인|날인))?\)\s*)$",
+        r"^(\s*(?:신\s*청\s*인|보험가입신고\(신청\)인|성\s*명|이\s*름)(?:\([^)]*\))*\s*:?)([ \t\u00a0\u3000_]{2,})(\(서명(?:\s*또는\s*(?:인|날인))?\)\s*)$",
         raw,
     )
     if m_sig:
         pre, mid_ws, suf = m_sig.groups()
+        if fm.OFFICIAL_INLINE_CTX_RE.search(prev_ctx + " " + direct_ctx + " " + pre):
+            report["skipped_fields"].append({"label": pre.strip(), "location": location, "reason": "excluded_section"})
+            return None
         name = (prof.get("applicant.name") or "").strip()
-        if name and len(mid_ws) >= len(name) + 6:
-            rem = len(mid_ws) - len(name) - 1
-            new_text = f"{pre} {name}{' ' * rem}{suf}"
-            report["filled_fields"].append({
-                "label": pre.strip(), "location": location, "field_key": "applicant.name",
-                "value": name, "section": "applicant",
-            })
-            report["sensitive_blank_fields"].append({
-                "label": suf.strip(), "location": location, "reason": "signature_kept_blank",
-            })
-            return {"mode": "after_anchor", "anchor": pre, "orig_text": raw, "new_text": new_text, "field_key": "applicant.name", "value": name}
+        if not name:
+            return None
+        need_w = 1 + fm.display_width_spaces(name) + 1
+        if fm.slot_width_spaces(mid_ws) < need_w:
+            report["skipped_fields"].append({"label": pre.strip(), "location": location, "reason": "no_room"})
+            return None
+        rem = max(1, fm.slot_width_spaces(mid_ws) - fm.display_width_spaces(name) - 1)
+        new_text = f"{pre} {name}{' ' * rem}{suf}"
+        report["filled_fields"].append({
+            "label": pre.strip(), "location": location, "field_key": "applicant.name",
+            "value": name, "section": "applicant",
+        })
+        report["sensitive_blank_fields"].append({
+            "label": suf.strip(), "location": location, "reason": "signature_kept_blank",
+        })
+        return {"mode": "after_anchor", "anchor": pre, "orig_text": raw, "new_text": new_text, "field_key": "applicant.name", "value": name}
     return None
 
 
@@ -125,6 +172,7 @@ def plan_hwp_fills(doc_dump: dict[str, Any], profile: dict[str, str] | None = No
         if tail_txt:
             tables_by_para.setdefault((tbl.get("section", 0), tbl.get("para", 0)), []).append(tail_txt)
 
+    para_pos_map = {(p.get("section", 0), p.get("para", 0)): i for i, p in enumerate(paras)}
     for idx, p in enumerate(paras):
         prev_chunks: list[str] = []
         for pj in range(max(0, idx - 3), idx):
@@ -133,7 +181,10 @@ def plan_hwp_fills(doc_dump: dict[str, Any], profile: dict[str, str] | None = No
                 prev_chunks.append(ptxt)
             prev_chunks.extend(tables_by_para.get((paras[pj]["section"], paras[pj]["para"]), []))
         next_chunks = [paras[pj].get("text", "").strip() for pj in range(idx + 1, min(len(paras), idx + 4)) if paras[pj].get("text", "").strip()]
-        ed = _plan_inline_line(p["text"], " ".join(prev_chunks), " ".join(next_chunks), prof, f"body s{p['section']} p{p['para']}", report)
+        ed = _plan_inline_line(
+            p["text"], " ".join(prev_chunks), " ".join(next_chunks), prof,
+            f"body s{p['section']} p{p['para']}", report, is_body=True,
+        )
         if ed:
             para_edits.append({"section": p["section"], "para": p["para"], **ed})
 
@@ -153,19 +204,43 @@ def plan_hwp_fills(doc_dump: dict[str, Any], profile: dict[str, str] | None = No
                     grid[(rr, cc)] = c
             max_r = max(max_r, r0 + rs)
 
-        tbl_section = "applicant"
+        # 표 직전(및 앵커) 본문 문단 제목(예: '효드림수당 지급대상자 명부')으로 제외 표인지 먼저 판별
+        tbl_sec_num, tbl_para_num = tbl.get("section", 0), tbl.get("para", 0)
+        p_pos = para_pos_map.get((tbl_sec_num, tbl_para_num), -1)
+        prev_body_title = ""
+        if p_pos >= 0:
+            prev_titles = [
+                paras[j].get("text", "").strip()
+                for j in range(max(0, p_pos - 2), p_pos + 1)
+                if paras[j].get("section", 0) == tbl_sec_num and paras[j].get("text", "").strip()
+            ]
+            prev_body_title = " ".join(prev_titles[-2:])
+        tbl_section = "excluded" if fm.detect_section_context(prev_body_title, current="keep") == "excluded" else "applicant"
+        max_c = tbl.get("col_count", 0) or (max((c["col"] + max(1, c.get("col_span", 1)) for c in cells), default=0))
         for r in range(max_r):
             row_cells = sorted(row_map.get(r, []), key=lambda x: x["col"])
-            # 왼쪽 병합 구역 헤더(col 0~2 중 span이 크거나 0열) 확인
+            # 왼쪽 병합 구역 헤더(col 0) 및 넓은 제목 행 확인
             c0_cell = grid.get((r, 0))
             if c0_cell and c0_cell.get("text"):
                 sec = fm.detect_section_context(c0_cell["text"], current="keep")
                 if sec != "keep":
                     tbl_section = sec
+            if any(max(1, rc.get("col_span", 1)) >= max(3, max_c // 2) for rc in row_cells):
+                row_joined = " ".join(rc.get("text", "") for rc in row_cells if rc.get("text"))
+                if row_joined and len(row_joined) <= 120:
+                    wsec = fm.detect_section_context(row_joined, current="keep")
+                    if wsec != "keep":
+                        tbl_section = wsec
             if len(row_cells) <= 2:
                 sec = fm.detect_section_context(" ".join(c["text"] for c in row_cells if c["text"]), current="keep")
                 if sec != "keep":
                     tbl_section = sec
+
+            c0_norm = fm.normalize_label(c0_cell.get("text", "")) if c0_cell else ""
+            row_only_excluded = bool(
+                fm.EXCLUDED_ROW_HEAD_RE.match(c0_norm)
+                or re.fullmatch(r"성명(?:여성|남성)", c0_norm)
+            )
 
             has_mobile_in_band = any(
                 ("휴대전화" in c2["text"] or "휴대폰" in c2["text"] or "핸드폰" in c2["text"])
@@ -179,15 +254,15 @@ def plan_hwp_fills(doc_dump: dict[str, Any], profile: dict[str, str] | None = No
                 lines = raw_text.split("\n")
 
                 # 구역이 셀 내부에서 바뀌는 경우도 반영 (예: WLF00000041_1 T0(3,6) '신고인(신청인)')
-                local_sec = tbl_section
-                if r >= 2 and c["col"] >= 4:
+                local_sec = "excluded" if row_only_excluded else tbl_section
+                if not row_only_excluded and r >= 2 and c["col"] >= 4:
                     left_neighbor = grid.get((r, c["col"] - 1))
                     if left_neighbor and left_neighbor.get("text"):
                         s2 = fm.detect_section_context(left_neighbor["text"], current="keep")
                         if s2 != "keep":
                             local_sec = s2
 
-                # (a) 셀 내 인라인 날짜/서명 문단 확인 (인접 비공백 줄 및 인접 행 문맥 포함)
+                # (a) 셀 내 인라인 날짜/서명 문단 확인 (단, 제외 구역은 건너뜀)
                 if any("년" in ln or "서명" in ln for ln in lines):
                     prev_row_txt = " ".join(
                         rc.get("text", "")
@@ -203,37 +278,43 @@ def plan_hwp_fills(doc_dump: dict[str, Any], profile: dict[str, str] | None = No
                     )
                     left_same_row = grid.get((r, c["col"] - 1)) if c["col"] > 0 else None
                     left_same_txt = left_same_row.get("text", "") if left_same_row else ""
-                    for l_idx, ln in enumerate(lines):
-                        prev_ln_ctx = " ".join(lines[max(0, l_idx - 3):l_idx]) + " " + prev_row_txt
-                        next_ln_ctx = " ".join(lines[l_idx + 1:min(len(lines), l_idx + 4)]) + " " + next_row_txt
-                        direct_parts = [
-                            left_same_txt,
-                            lines[l_idx - 1] if l_idx > 0 else "",
-                            lines[l_idx + 1] if l_idx + 1 < len(lines) else "",
-                        ]
-                        ed = _plan_inline_line(
-                            ln, prev_ln_ctx, next_ln_ctx, prof,
-                            f"T{t_idx}({c['row']},{c['col']}) p{l_idx}",
-                            report,
-                            direct_ctx=" ".join(direct_parts),
-                        )
-                        if ed:
-                            if ed.get("field_key") == "apply_date":
-                                handled_date_cells.add((t_idx, c["cell_idx"]))
-                            k = (t_idx, c["cell_idx"], l_idx, ed["mode"])
-                            if k not in filled_cell_ops:
-                                filled_cell_ops.add(k)
-                                cell_edits.append({
-                                    "table_index": t_idx,
-                                    "section": tbl.get("section", 0),
-                                    "para": tbl.get("para", 0),
-                                    "control": tbl.get("control", 0),
-                                    "cell_idx": c["cell_idx"],
-                                    "cell_para_idx": l_idx,
-                                    "row": c["row"],
-                                    "col": c["col"],
-                                    **ed,
-                                })
+                    if local_sec == "excluded":
+                        if any(re.fullmatch(r"(?:20\s*)?년\s*월\s*일", re.sub(r"\s+", " ", ln).strip()) for ln in lines):
+                            report["skipped_fields"].append({
+                                "label": "년 월 일", "location": f"T{t_idx}({c['row']},{c['col']})", "reason": "excluded_section",
+                            })
+                    else:
+                        for l_idx, ln in enumerate(lines):
+                            prev_ln_ctx = " ".join(lines[max(0, l_idx - 3):l_idx]) + " " + prev_row_txt
+                            next_ln_ctx = " ".join(lines[l_idx + 1:min(len(lines), l_idx + 4)])
+                            direct_parts = [
+                                left_same_txt,
+                                lines[l_idx - 1] if l_idx > 0 else "",
+                                lines[l_idx + 1] if l_idx + 1 < len(lines) else "",
+                            ]
+                            ed = _plan_inline_line(
+                                ln, prev_ln_ctx, next_ln_ctx, prof,
+                                f"T{t_idx}({c['row']},{c['col']}) p{l_idx}",
+                                report,
+                                direct_ctx=" ".join(direct_parts),
+                            )
+                            if ed:
+                                if ed.get("field_key") == "apply_date":
+                                    handled_date_cells.add((t_idx, c["cell_idx"]))
+                                k = (t_idx, c["cell_idx"], l_idx, ed["mode"])
+                                if k not in filled_cell_ops:
+                                    filled_cell_ops.add(k)
+                                    cell_edits.append({
+                                        "table_index": t_idx,
+                                        "section": tbl.get("section", 0),
+                                        "para": tbl.get("para", 0),
+                                        "control": tbl.get("control", 0),
+                                        "cell_idx": c["cell_idx"],
+                                        "cell_para_idx": l_idx,
+                                        "row": c["row"],
+                                        "col": c["col"],
+                                        **ed,
+                                    })
 
                 # (b) 셀 안에 '[핸드폰]' / '휴대전화' 단독 문단이 있는 경우 같은 줄 끝에 번호 추가 (오른쪽 빈 값 셀이 있으면 건너뜀)
                 rs_c, cs_c = max(1, c.get("row_span", 1)), max(1, c.get("col_span", 1))
@@ -317,14 +398,22 @@ def plan_hwp_fills(doc_dump: dict[str, Any], profile: dict[str, str] | None = No
                 # (d) 셀 내 '(전화번호 :       )' / '휴대전화번호:' 인라인 삽입
                 if local_sec == "applicant":
                     app_phone = (prof.get("applicant.phone") or "").strip()
+                    need_ph_w = 1 + fm.display_width_spaces(app_phone) + 1
                     for l_idx, ln in enumerate(lines):
                         if not app_phone:
                             break
                         if "휴대전화번호:" in ln:
                             k = (t_idx, c["cell_idx"], l_idx, "after_anchor")
                             if k not in filled_cell_ops:
-                                m_hp = re.search(r"(휴대전화번호\s*:\s*)(\s{4,})", ln)
+                                m_hp = re.search(r"(휴대전화번호\s*:)([ \t\u00a0\u3000_]+)", ln)
                                 if m_hp:
+                                    if fm.slot_width_spaces(m_hp.group(2)) < need_ph_w:
+                                        report["skipped_fields"].append({
+                                            "label": "휴대전화번호:",
+                                            "location": f"T{t_idx}({c['row']},{c['col']}) p{l_idx}",
+                                            "reason": "no_room",
+                                        })
+                                        continue
                                     filled_cell_ops.add(k)
                                     cell_edits.append({
                                         "table_index": t_idx,
@@ -352,8 +441,15 @@ def plan_hwp_fills(doc_dump: dict[str, Any], profile: dict[str, str] | None = No
                         elif re.search(r"\(전화(?:번호)?\s*:\s*\)", re.sub(r"\s{2,}", " ", ln)):
                             k = (t_idx, c["cell_idx"], l_idx, "after_anchor")
                             if k not in filled_cell_ops and "휴대전화" not in ln:
-                                m_ph = re.search(r"(\(전화(?:번호)?\s*:)\s{6,}\)", ln)
+                                m_ph = re.search(r"(\(전화(?:번호)?\s*:)([ \t\u00a0\u3000_]+)\)", ln)
                                 if m_ph:
+                                    if fm.slot_width_spaces(m_ph.group(2)) < need_ph_w:
+                                        report["skipped_fields"].append({
+                                            "label": "(전화번호 : )",
+                                            "location": f"T{t_idx}({c['row']},{c['col']}) p{l_idx}",
+                                            "reason": "no_room",
+                                        })
+                                        continue
                                     filled_cell_ops.add(k)
                                     cell_edits.append({
                                         "table_index": t_idx,
@@ -422,7 +518,14 @@ def plan_hwp_fills(doc_dump: dict[str, Any], profile: dict[str, str] | None = No
                     r_text = right_c.get("text", "")
                     if fm.is_cell_empty(r_text):
                         target_c = right_c
-                    elif dec.field_key in ("applicant.rrn", "proxy.rrn") and re.fullmatch(r"\s*\(만\s*세\)\s*", r_text):
+                    elif dec.field_key in ("applicant.rrn", "proxy.rrn") and re.fullmatch(r"([ \t\u00a0\u3000_]*)\(만\s*세\)\s*", r_text):
+                        lead_rrn = re.match(r"^([ \t\u00a0\u3000_]*)", r_text).group(1)
+                        if fm.slot_width_spaces(lead_rrn) < fm.display_width_spaces(dec.value or "") + 1:
+                            report["skipped_fields"].append({
+                                "label": txt.replace("\n", " "), "location": f"T{t_idx}({c['row']},{c['col']})",
+                                "reason": "no_room",
+                            })
+                            continue
                         target_c = right_c
                         target_para_idx = 0
                         edit_mode = "prepend_trim_spaces"
@@ -435,6 +538,14 @@ def plan_hwp_fills(doc_dump: dict[str, Any], profile: dict[str, str] | None = No
                         else:
                             r_lines = r_text.split("\n")
                             if len(r_lines) == 1 and re.search(r"^\s*\(전화", r_lines[0]):
+                                lead_addr = re.match(r"^([ \t\u00a0\u3000_]*)", r_lines[0]).group(1)
+                                lead_w = fm.slot_width_spaces(lead_addr)
+                                if 0 < lead_w < fm.display_width_spaces(dec.value or "") + 1:
+                                    report["skipped_fields"].append({
+                                        "label": txt.replace("\n", " "), "location": f"T{t_idx}({c['row']},{c['col']})",
+                                        "reason": "no_room",
+                                    })
+                                    continue
                                 target_c = right_c
                                 target_para_idx = 0
                                 edit_mode = "prepend_trim_spaces"
@@ -446,6 +557,16 @@ def plan_hwp_fills(doc_dump: dict[str, Any], profile: dict[str, str] | None = No
                         and below_c.get("col_span", 1) == cs
                         and fm.is_cell_empty(below_c.get("text", ""))
                     ):
+                        rh_below = grid.get((below_c["row"], 0))
+                        rh_norm = fm.normalize_label(rh_below.get("text", "")) if rh_below else ""
+                        if fm.EXCLUDED_ROW_HEAD_RE.match(rh_norm) or (
+                            rh_below and fm.detect_section_context(rh_below.get("text", ""), current="keep") == "excluded"
+                        ):
+                            report["skipped_fields"].append({
+                                "label": txt.replace("\n", " "), "location": f"T{t_idx}({below_c['row']},{below_c['col']})",
+                                "reason": "excluded_section",
+                            })
+                            continue
                         target_c = below_c
                 if (
                     target_c is None
@@ -466,11 +587,20 @@ def plan_hwp_fills(doc_dump: dict[str, Any], profile: dict[str, str] | None = No
                     })
                     continue
 
+                ok_font, override_sid = _resolve_font_override(target_c, c, doc_dump)
+                if not ok_font:
+                    report["skipped_fields"].append({
+                        "label": txt.replace("\n", " "),
+                        "location": f"T{t_idx}({target_c['row']},{target_c['col']})",
+                        "reason": "tiny_font",
+                    })
+                    continue
+
                 key = (t_idx, target_c["cell_idx"], target_para_idx, edit_mode)
                 if key in filled_cell_ops:
                     continue
                 filled_cell_ops.add(key)
-                cell_edits.append({
+                ed_payload: dict[str, Any] = {
                     "table_index": t_idx,
                     "section": tbl.get("section", 0),
                     "para": tbl.get("para", 0),
@@ -485,7 +615,10 @@ def plan_hwp_fills(doc_dump: dict[str, Any], profile: dict[str, str] | None = No
                     "field_key": dec.field_key,
                     "value": dec.value,
                     "label": txt.replace("\n", " "),
-                })
+                }
+                if override_sid >= 0:
+                    ed_payload["override_char_shape_id"] = override_sid
+                cell_edits.append(ed_payload)
                 report["filled_fields"].append({
                     "label": txt.replace("\n", " "),
                     "location": f"T{t_idx}({target_c['row']},{target_c['col']}) p{target_para_idx}",

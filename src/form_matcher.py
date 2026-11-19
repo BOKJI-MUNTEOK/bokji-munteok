@@ -15,15 +15,30 @@ from datetime import date
 # 서명·날인 차단 목록 (반드시 비워 둠)
 SENSITIVE_RE = re.compile(r"서명|\(인\)|날인|도장|서명\s*또는\s*인")
 
-# 기입 제외 구역 (가구원, 담당자, 기관, 고인/타인 구역 등)
+# 기입 제외 구역 (가구원, 담당자, 기관·공무원, 고인/타인/보증/명부 구역 등)
 EXCLUDED_SECTION_RE = re.compile(
     r"가구원|가족\s*사항|동거\s*가족|세대원|세대\s*구성원|부양\s*의무자|동행\s*가족|"
-    r"융자\s*대상자|보훈\s*대상자|사망자|고인|배우자\s*성명|배우자\s*생년월일|배우자\s*연간|"
-    r"대상자\s*\(\s*아\s*동\s*\)|가입\s*선원|피보험자|권\s*유\s*자|"
-    r"미성년자|법정대리인|친권자|후견인|"
+    r"융자\s*대상자|보훈\s*대상자|사망자|(?<![가-힣])고인(?![가-힣])|배우자\s*성명|배우자\s*생년월일|배우자\s*연간|"
+    r"대상자\s*\(\s*아\s*동\s*\)|가입\s*선원|피보험자|권\s*유\s*자|직계존속|"
+    r"미성년자|법정대리인|친권자|후견인|동순위\s*수급권자|대표자\s*선정|인우보증|"
     r"담당자|담당\s*공무원|담당\s*직원|처리기관|확인자|접수\s*담당|작성자\s*\(공무원\)|"
+    r"요양기관|진단기관|진료기관|읍\s*[·ㆍ.]?\s*면장|읍면동\s*담당|동장|기관\s*확인|직인|"
+    r"처리\s*(?:기관|부서|담당|결과|내용|절차|의견|현황)|접수\s*(?:기관|담당|처|부서|확인)|"
+    r"신청인이\s*기재하지\s*않|지원대상\s*확인|지급대상자\s*명부|대상자\s*명부|신청자\s*명부|"
     r"추천인|추천기관|보증인|연대보증인|결재|확인란|"
     r"사업장|근무처|직장정보|입소시설|치료기관|의료기관|학교정보"
+)
+
+# 인라인 날짜/서명란 차단 문맥 (공무원·확인자·보증인 구역)
+OFFICIAL_INLINE_CTX_RE = re.compile(
+    r"확인자|담당\s*공무원\s*(?:확인(?!사항)|서명|성명|직)|담당자\s*(?:직|성명|서명|확인)|"
+    r"읍\s*[·ㆍ.]?\s*면장|읍면동\s*담당|동장|직인|결재|활동보조인|"
+    r"보증합니다|보증인|신청인이\s*기재하지\s*않"
+)
+
+# 표 헤더 아래 행 기입 시 제외할 행 머리말 (부부 분리행·가구원)
+EXCLUDED_ROW_HEAD_RE = re.compile(
+    r"^(?:여성|남성|배우자|부|모|자녀|동거인|세대원|가구원|직계존속)$"
 )
 
 # 대리인 구역
@@ -34,6 +49,7 @@ PROXY_SECTION_RE = re.compile(
 # 신청인(본인) 구역
 APPLICANT_SECTION_RE = re.compile(
     r"신청인|수급자|이용자|가입자|청구인|본인|위임하는\s*사람|위임인|"
+    r"신고\s*\(\s*신청\s*\)\s*인|신고인|"
     r"참여자|신청자|지원\s*신청자|대출신청인|교육생|인적사항|기본사항|지원신청\s*장애인|신청자\s*\(\s*보호자\s*\)"
 )
 
@@ -41,11 +57,22 @@ APPLICANT_SECTION_RE = re.compile(
 NON_TARGET_LABEL_RE = re.compile(
     r"사업명|(?<!금융)기관명|시설명|단체명|법인명|학교명|병원명|서비스명|계좌명|상품명|질환명|직장명|"
     r"담당\s*부서|문의처|제출처|기관\s*연락처|접수처|대표자\s*성명|사업주|사업장|"
+    r"여성휴대폰|남성휴대폰|성명\s*\(\s*(?:여성|남성)\s*\)|여\s*성\s*주\s*소|남\s*성\s*주\s*소|"
     r"지급일|시행일|접수일|발급일|입금일|결재일|만료일|계약일|출산|사망일|혼인일|전입일|퇴직일|"
     r"입사연월일|성립일|발생일|감소일|개시일|납부일|지정일|"
     r"연간소득|연소득|보수총액|이전월\s*소득|대상월|"
     r"우편번호|이메일|전자우편|팩스|FAX|홈페이지|비고|참고|안내|유의사항"
 )
+
+
+def display_width_spaces(text: str) -> int:
+    """공백 1칸=1 기준으로 텍스트 표시 폭을 계산한다(한글·전각=2, 숫자·영문·반각=1)."""
+    return sum(2 if ord(ch) > 0x7F else 1 for ch in (text or ""))
+
+
+def slot_width_spaces(text: str) -> int:
+    """공백·밑줄 자리표시 문자열의 표시 폭을 계산한다(전각 공백 \\u3000=2, 그 외=1)."""
+    return sum(2 if ch == "\u3000" else 1 for ch in (text or ""))
 
 
 @dataclass
@@ -80,15 +107,18 @@ def detect_section_context(text: str, current: str = "applicant") -> str:
     if not text:
         return current
     compact = re.sub(r"\s+", " ", text).strip()
-    compact_ns = re.sub(r"\s+", "", text)
-    # '보훈대상자와의 관계' 같은 관계 라벨 자체는 구역 헤더가 아님 (단, '가족 사항 세대주와의관계'처럼 다른 헤더가 함께 있으면 제외하지 않음)
-    if re.fullmatch(r"(?:보훈대상자|지원대상자|신청인|세대주)와의\s*관계", compact) or re.fullmatch(r"(?:보훈대상자|지원대상자|신청인|세대주)와의관계", compact_ns):
+    # 신청인 확인/서명 문단 안에 붙은 주의사항('※ 만 14세 미만인 경우 ... 법정대리인...', '담당공무원으로부터 안내받았으며')은 제외 구역 헤더로 보지 않음
+    compact_for_sec = re.sub(r"※\s*만\s*14세[^.\n]*법정대리인[^.\n]*\.?", "", compact).strip()
+    compact_for_sec = re.sub(r"담당\s*공무원으로부터\s*안내[^.\n]*\.?", "", compact_for_sec).strip()
+    compact_ns = re.sub(r"\s+", "", compact_for_sec)
+    # '보훈대상자와의 관계' 같은 관계 라벨 자체는 구역 헤더가 아님
+    if re.fullmatch(r"(?:보훈대상자|지원대상자|신청인|세대주)와의\s*관계", compact_for_sec) or re.fullmatch(r"(?:보훈대상자|지원대상자|신청인|세대주)와의관계", compact_ns):
         return current
-    if EXCLUDED_SECTION_RE.search(compact) or EXCLUDED_SECTION_RE.search(compact_ns):
+    if EXCLUDED_SECTION_RE.search(compact_for_sec) or EXCLUDED_SECTION_RE.search(compact_ns):
         return "excluded"
-    if PROXY_SECTION_RE.search(compact) or PROXY_SECTION_RE.search(compact_ns):
+    if PROXY_SECTION_RE.search(compact_for_sec) or PROXY_SECTION_RE.search(compact_ns):
         return "proxy"
-    if APPLICANT_SECTION_RE.search(compact) or APPLICANT_SECTION_RE.search(compact_ns):
+    if APPLICANT_SECTION_RE.search(compact_for_sec) or APPLICANT_SECTION_RE.search(compact_ns):
         return "applicant"
     return current
 

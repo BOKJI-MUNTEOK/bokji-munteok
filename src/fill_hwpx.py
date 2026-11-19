@@ -38,8 +38,51 @@ def _tc_text(tc: etree._Element) -> str:
     ).strip()
 
 
-def _set_tc_text(tc: etree._Element, value: str) -> bool:
-    """빈 셀 tc의 첫 번째 문단 첫 번째 run에 value를 넣는다. 원본 문단/글자 스타일은 유지."""
+def _parse_char_pr_heights(zin: zipfile.ZipFile) -> tuple[dict[str, int], str | None]:
+    """Contents/header.xml에서 charPr id별 글자 크기(1/100 pt)와 문서 기본 글자 모양 id를 뽑는다."""
+    heights: dict[str, int] = {}
+    if "Contents/header.xml" not in zin.namelist():
+        return heights, None
+    try:
+        info = zin.getinfo("Contents/header.xml")
+        if info.file_size > MAX_HWPX_UNCOMPRESSED_BYTES:
+            return heights, None
+        hdr = etree.fromstring(zin.read("Contents/header.xml"), parser=SAFE_XML_PARSER)
+    except (etree.XMLSyntaxError, KeyError, zipfile.BadZipFile, ValueError):
+        return heights, None
+
+    default_cid: str | None = None
+    fallback_cid: str | None = None
+    for cp in hdr.xpath(".//*[local-name()='charPr']"):
+        cid = cp.get("id")
+        h_str = cp.get("height")
+        if not cid or not h_str:
+            continue
+        try:
+            h_val = int(h_str)
+        except ValueError:
+            continue
+        heights[cid] = h_val
+        if default_cid is None and 800 <= h_val <= 1100:
+            default_cid = cid
+        if fallback_cid is None and h_val >= 700:
+            fallback_cid = cid
+    return heights, default_cid or fallback_cid
+
+
+def _tc_char_pr_id(tc: etree._Element) -> str | None:
+    sub = next((ch for ch in tc if _local(ch.tag) == "subList"), None)
+    if sub is None:
+        return None
+    p0 = next((ch for ch in sub if _local(ch.tag) == "p"), None)
+    if p0 is None:
+        return None
+    run0 = next((ch for ch in p0 if _local(ch.tag) == "run"), None)
+    return run0.get("charPrIDRef") if run0 is not None else None
+
+
+def _set_tc_text(tc: etree._Element, value: str, *, override_char_pr_id: str | None = None) -> bool:
+    """빈 셀 tc의 첫 번째 문단 첫 번째 run에 value를 넣는다. 필요 시 글자 모양 id를 교체한다."""
     sub = next((ch for ch in tc if _local(ch.tag) == "subList"), None)
     if sub is None:
         return False
@@ -53,6 +96,8 @@ def _set_tc_text(tc: etree._Element, value: str) -> bool:
     runs = [ch for ch in p0 if _local(ch.tag) == "run"]
     if runs:
         run0 = runs[0]
+        if override_char_pr_id is not None:
+            run0.set("charPrIDRef", override_char_pr_id)
         t_el = next((ch for ch in run0 if _local(ch.tag) == "t"), None)
         if t_el is None:
             t_el = etree.SubElement(run0, f"{{{NS_HP}}}t")
@@ -63,54 +108,183 @@ def _set_tc_text(tc: etree._Element, value: str) -> bool:
                     if _local(c.tag) == "t":
                         c.text = ""
     else:
-        run0 = etree.SubElement(p0, f"{{{NS_HP}}}run", charPrIDRef="0")
+        run0 = etree.SubElement(p0, f"{{{NS_HP}}}run", charPrIDRef=override_char_pr_id or "0")
         t_el = etree.SubElement(run0, f"{{{NS_HP}}}t")
         t_el.text = value
     return True
 
 
-def _insert_into_inline_whitespace(p_el: etree._Element, insert_after_sub: str, value: str) -> bool:
-    """원본 문단의 어떤 글자도 삭제하지 않고, 지정된 앵커 문자열 뒤의 공백 run/t 자리에 value를 끼워 넣는다."""
+_SLOT_CHARS = frozenset((" ", "_", "\u00a0", "\u3000"))
+_NON_APP_DATE_RE = re.compile(
+    r"(?:출산\s*(?:예정)?|사망|발생|접수|지급|입사)\s*일|입금\s*(?:확인|됨)|보험료\s*입금"
+)
+
+
+def _collect_t_elems(p_el: etree._Element) -> list[etree._Element]:
     runs = [ch for ch in p_el if _local(ch.tag) == "run"]
-    if not runs:
-        return False
-    if any(_local(c.tag) in ("tbl", "rect", "pic") for r in runs for c in r):
-        return False
+    if not runs or any(_local(c.tag) in ("tbl", "rect", "pic") for r in runs for c in r):
+        return []
+    return [c for r in runs for c in r if _local(c.tag) == "t" and c.text]
+
+
+def _slot_width_after(t_elems: list[etree._Element], full_pos: int) -> tuple[int, list[tuple[int, int, int]]]:
+    """full_pos 뒤부터 이어지는 공백/밑줄 자리표시자 목록과 총 표시 폭을 여러 <hp:t>에 걸쳐 계산한다."""
+    slots: list[tuple[int, int, int]] = []
+    cur = 0
+    started = False
+    for ti, t in enumerate(t_elems):
+        txt = t.text or ""
+        for ci, ch in enumerate(txt):
+            gpos = cur + ci
+            if gpos < full_pos:
+                continue
+            started = True
+            if ch in _SLOT_CHARS:
+                w = 2 if ch == "\u3000" else 1
+                slots.append((ti, ci, w))
+            elif started:
+                return sum(s[2] for s in slots), slots
+        cur += len(txt)
+    return sum(s[2] for s in slots), slots
+
+
+def _replace_slot_after(
+    p_el: etree._Element,
+    anchor: str,
+    value: str,
+    *,
+    leading_space: bool = True,
+    min_keep: int = 1,
+) -> tuple[bool, str]:
+    """원본 글자를 지우지 않고 여러 run에 걸친 뒤따르는 공백 폭을 줄여 value를 삽입한다."""
+    t_elems = _collect_t_elems(p_el)
+    if not t_elems:
+        return False, "no_text"
+    full = "".join(t.text or "" for t in t_elems)
+    pos = full.find(anchor)
+    if pos < 0:
+        return False, "no_anchor"
+    target_idx = pos + len(anchor)
+
+    avail_w, slots = _slot_width_after(t_elems, target_idx)
+    ins = (" " + value) if leading_space else value
+    ins_w = fm.display_width_spaces(ins)
+    if avail_w < ins_w + min_keep or not slots:
+        return False, "no_room"
+
     for lsa in list(p_el):
         if _local(lsa.tag) == "linesegarray":
             p_el.remove(lsa)
 
-    # 전체 텍스트가 한 개의 run이나 여러 <t>에 나뉘어 있을 수 있으므로 첫 일치 위치에 정확히 삽입
-    t_elems = []
-    for r in runs:
-        for c in r:
-            if _local(c.tag) == "t" and c.text:
-                t_elems.append(c)
+    # ins_w만큼 뒤따르는 공백을 줄이되 최소 min_keep 폭은 남긴다
+    to_drop: list[tuple[int, int]] = []
+    dropped_w = 0
+    for ti, ci, w in slots:
+        if dropped_w >= ins_w or (avail_w - (dropped_w + w)) < min_keep:
+            break
+        to_drop.append((ti, ci))
+        dropped_w += w
+
+    first_ti, first_ci = slots[0][0], slots[0][1]
+    drop_by_t: dict[int, set[int]] = {}
+    for ti, ci in to_drop:
+        drop_by_t.setdefault(ti, set()).add(ci)
+
+    for ti, t in enumerate(t_elems):
+        txt = t.text or ""
+        drops = drop_by_t.get(ti, set())
+        if ti == first_ti:
+            parts: list[str] = []
+            inserted = False
+            for ci, ch in enumerate(txt):
+                if ci == first_ci and not inserted:
+                    parts.append(ins)
+                    inserted = True
+                if ci not in drops:
+                    parts.append(ch)
+            t.text = "".join(parts)
+        elif drops:
+            t.text = "".join(ch for ci, ch in enumerate(txt) if ci not in drops)
+    return True, "ok"
+
+
+def _fill_hwpx_date_line(p_el: etree._Element, yr: str, mo: str, dy: str, *, is_20: bool) -> tuple[bool, str]:
+    t_elems = _collect_t_elems(p_el)
     if not t_elems:
-        return False
-    full = "".join(t.text for t in t_elems)
-    pos = full.find(insert_after_sub)
-    if pos < 0:
-        return False
-    target_idx = pos + len(insert_after_sub)
+        return False, "no_text"
+    full = "".join(t.text or "" for t in t_elems)
+    y_pos = full.find("년")
+    m_pos = full.find("월", max(0, y_pos + 1))
+    if y_pos < 0 or m_pos < 0:
+        return False, "no_anchor"
+
+    yr2 = yr[-2:]
+    avail_ym, _ = _slot_width_after(t_elems, y_pos + 1)
+    avail_md, _ = _slot_width_after(t_elems, m_pos + 1)
+    if avail_ym < len(mo) + 1 or avail_md < len(dy) + 1:
+        return False, "no_room"
+
+    p20 = full.find("20") if is_20 else -1
+    if is_20:
+        if p20 < 0 or p20 > y_pos:
+            return False, "no_anchor"
+        avail_20, _ = _slot_width_after(t_elems, p20 + 2)
+        if avail_20 < len(yr2) + 1:
+            return False, "no_room"
+
+    # 오른쪽에서 왼쪽으로 채워 앞쪽 인덱스를 흔들지 않는다
+    ok_md, reason_md = _replace_slot_after(p_el, "월", dy, leading_space=(avail_md >= len(dy) + 2), min_keep=1)
+    if not ok_md:
+        return False, reason_md
+    ok_ym, reason_ym = _replace_slot_after(p_el, "년", mo, leading_space=(avail_ym >= len(mo) + 2), min_keep=1)
+    if not ok_ym:
+        return False, reason_ym
+
+    if is_20:
+        return _replace_slot_after(p_el, "20", yr2, leading_space=False, min_keep=1)
+
+    # '년' 앞의 공백에서 연도 자릿수(4)만큼 덜어내고 연도 삽입
+    t_elems2 = _collect_t_elems(p_el)
+    full2 = "".join(t.text or "" for t in t_elems2)
+    y_pos2 = full2.find("년")
+    if y_pos2 < 0:
+        return False, "no_anchor"
+    cur = 0
+    # y_pos2 직전까지 역방향으로 공백 폭 <= len(yr) 만큼 제거
+    lead_slots: list[tuple[int, int, int]] = []
+    for ti, t in enumerate(t_elems2):
+        txt = t.text or ""
+        for ci, ch in enumerate(txt):
+            if cur + ci >= y_pos2:
+                break
+            lead_slots.append((ti, ci, 2 if ch == "\u3000" else (1 if ch in _SLOT_CHARS else 0)))
+        cur += len(txt)
+
+    to_drop_y: list[tuple[int, int]] = []
+    trimmed_w = 0
+    for ti, ci, w in reversed(lead_slots):
+        if w == 0 or trimmed_w >= len(yr):
+            break
+        to_drop_y.append((ti, ci))
+        trimmed_w += w
+
+    drop_map: dict[int, set[int]] = {}
+    for ti, ci in to_drop_y:
+        drop_map.setdefault(ti, set()).add(ci)
 
     cur = 0
-    for t in t_elems:
-        nxt = cur + len(t.text)
-        if target_idx <= nxt:
-            offset = target_idx - cur
-            before = t.text[:offset]
-            after = t.text[offset:]
-            # 공백만 일부 대체하되 비공백 문자는 절대 삭제하지 않음
-            lead_spaces = len(after) - len(after.lstrip(" "))
-            if lead_spaces >= len(value) + 2:
-                after = " " + value + " " * max(1, lead_spaces - len(value) - 1) + after.lstrip(" ")
-            else:
-                after = " " + value + " " + after.lstrip(" ")
-            t.text = before + after
-            return True
-        cur = nxt
-    return False
+    for ti, t in enumerate(t_elems2):
+        txt = t.text or ""
+        drops = drop_map.get(ti, set())
+        parts: list[str] = []
+        for ci, ch in enumerate(txt):
+            if cur + ci == y_pos2:
+                parts.append(yr)
+            if ci not in drops:
+                parts.append(ch)
+        t.text = "".join(parts)
+        cur += len(txt)
+    return True, "ok"
 
 
 def _fill_inline_paragraphs(
@@ -130,19 +304,30 @@ def _fill_inline_paragraphs(
 
         # 1) 신청 날짜 인라인: '년   월   일' 또는 '20   년   월   일'
         if re.fullmatch(r"(?:20\s*)?년\s*월\s*일", stripped):
-            prev_ctx = context_hint + " "
-            if pi > 0:
-                prev_ctx += "".join(paragraphs[pi - 1].xpath(".//*[local-name()='t']/text()"))
-            # 출산예정일/사망일자/계약일 등이면 절대 기입 금지
-            if any(bad in prev_ctx for bad in ("출산", "사망", "발생", "접수", "지급", "입사")):
+            prev_ctx = context_hint + " " + " ".join(
+                "".join(paragraphs[pj].xpath(".//*[local-name()='t']/text()")).strip()
+                for pj in range(max(0, pi - 3), pi)
+            )
+            # 출산예정일/사망일자/계약일 등이면 절대 기입 금지 (단, '출산서비스'·'지급계좌' 같은 서비스명/안내어는 제외)
+            if _NON_APP_DATE_RE.search(prev_ctx):
                 report["skipped_fields"].append({
                     "label": stripped,
                     "location": f"{location_prefix}, p{pi}",
                     "reason": "non_application_date_context",
                 })
                 continue
-            # 선언/서명 문맥 확인 (단독 '년 월 일'인 경우 앞이나 뒤 문단에 신청/동의/확인/서명이 있어야 함)
-            next_ctx = "".join(paragraphs[pi + 1].xpath(".//*[local-name()='t']/text()")) if pi + 1 < len(paragraphs) else ""
+            # 선언/서명 문맥 확인 (인접 3문단 범위 내 확인자/담당자 차단)
+            next_ctx = " ".join(
+                "".join(paragraphs[pj].xpath(".//*[local-name()='t']/text()")).strip()
+                for pj in range(pi + 1, min(len(paragraphs), pi + 4))
+            )
+            if fm.OFFICIAL_INLINE_CTX_RE.search(prev_ctx + " " + next_ctx):
+                report["skipped_fields"].append({
+                    "label": stripped,
+                    "location": f"{location_prefix}, p{pi}",
+                    "reason": "excluded_section",
+                })
+                continue
             if not any(ok in (prev_ctx + " " + next_ctx) for ok in ("신청", "동의", "확인", "신고", "서명")):
                 report["skipped_fields"].append({
                     "label": stripped,
@@ -156,96 +341,55 @@ def _fill_inline_paragraphs(
                 continue
             yr, mo, dy = date_parts[:3]
             apply_date_val = (profile.get("apply_date") or f"{yr}년 {mo}월 {dy}일").strip()
-            # '20   년   월   일'처럼 '20'이 고정돼 있으면 두 자리 연도('26')는 검증 허용목록 충돌로 건너뛰고 보고
-            m_20 = re.match(r"^(\s*20)(\s+)(년)(\s+)(월)(\s+)(일\s*)$", raw)
-            m_plain = re.match(r"^(\s*)(년)(\s+)(월)(\s+)(일\s*)$", raw)
-            if m_20:
-                yr2 = yr[-2:]
-                runs = [ch for ch in p_el if _local(ch.tag) == "run"]
-                t_elems = [c for r in runs for c in r if _local(c.tag) == "t" and c.text]
-                for lsa in list(p_el):
-                    if _local(lsa.tag) == "linesegarray":
-                        p_el.remove(lsa)
-                inserted_y2 = False
-                for t in t_elems:
-                    if t.text and "20" in t.text:
-                        idx_20 = t.text.index("20") + 2
-                        after_20 = t.text[idx_20:]
-                        lead_sp = len(after_20) - len(after_20.lstrip(" "))
-                        keep_sp = " " if lead_sp >= 3 else after_20[:lead_sp]
-                        t.text = t.text[:idx_20] + yr2 + keep_sp + after_20.lstrip(" ")
-                        inserted_y2 = True
-                        break
-                if inserted_y2:
-                    ok2 = _insert_into_inline_whitespace(p_el, "년", mo)
-                    ok3 = _insert_into_inline_whitespace(p_el, "월", dy)
-                    for t in t_elems:
-                        if t.text and "년" in t.text and "월" in t.text:
-                            t.text = re.sub(rf"년\s*{re.escape(mo)}\s*월", f"년 {mo} 월", t.text)
-                        if t.text and dy in t.text and "일" in t.text:
-                            t.text = re.sub(rf"월\s*{re.escape(dy)}\s*일", f"월 {dy} 일", t.text)
-                            t.text = re.sub(rf"^\s*{re.escape(dy)}\s*일", f" {dy} 일", t.text)
-                    if ok2 and ok3:
-                        report["filled_fields"].append({
-                            "label": stripped,
-                            "location": f"{location_prefix}, p{pi}",
-                            "field_key": "apply_date",
-                            "value": apply_date_val,
-                            "section": "applicant",
-                        })
-                        filled += 1
-                continue
-            elif m_plain:
-                # '년' 앞에 연도 4자리 삽입 (원본 '년', '월', '일' 모두 보존)
-                runs = [ch for ch in p_el if _local(ch.tag) == "run"]
-                t_elems = [c for r in runs for c in r if _local(c.tag) == "t" and c.text]
-                for lsa in list(p_el):
-                    if _local(lsa.tag) == "linesegarray":
-                        p_el.remove(lsa)
-                inserted_year = False
-                for t in t_elems:
-                    if "년" in t.text:
-                        idx_y = t.text.index("년")
-                        before_y = t.text[:idx_y]
-                        # 오른쪽 정렬·좁은 줄폭에서 줄바꿈으로 글자가 겹치지 않도록 과도한 선행 공백 제거
-                        trailing_sp = len(before_y) - len(before_y.rstrip(" "))
-                        trim = max(0, trailing_sp - 1) if trailing_sp <= 4 else trailing_sp
-                        t.text = (before_y[:-trim] if trim else before_y) + yr + t.text[idx_y:]
-                        inserted_year = True
-                        break
-                if inserted_year:
-                    ok2 = _insert_into_inline_whitespace(p_el, "년", mo)
-                    ok3 = _insert_into_inline_whitespace(p_el, "월", dy)
-                    for t in t_elems:
-                        if t.text and "년" in t.text and "월" in t.text:
-                            t.text = re.sub(rf"년\s*{re.escape(mo)}\s*월", f"년 {mo} 월", t.text)
-                        if t.text and dy in t.text and "일" in t.text:
-                            t.text = re.sub(rf"월\s*{re.escape(dy)}\s*일", f"월 {dy} 일", t.text)
-                            t.text = re.sub(rf"^\s*{re.escape(dy)}\s*일", f" {dy} 일", t.text)
-                    if ok2 and ok3:
-                        report["filled_fields"].append({
-                            "label": stripped,
-                            "location": f"{location_prefix}, p{pi}",
-                            "field_key": "apply_date",
-                            "value": apply_date_val,
-                            "section": "applicant",
-                        })
-                        filled += 1
+            m_20 = re.match(r"^(\s*20)([ \t\u00a0\u3000_]+)(년)([ \t\u00a0\u3000_]+)(월)([ \t\u00a0\u3000_]+)(일\s*)$", raw)
+            m_plain = re.match(r"^([ \t\u00a0\u3000_]*)(년)([ \t\u00a0\u3000_]+)(월)([ \t\u00a0\u3000_]+)(일\s*)$", raw)
+            if m_20 or m_plain:
+                ok_dt, reason_dt = _fill_hwpx_date_line(p_el, yr, mo, dy, is_20=bool(m_20))
+                if ok_dt:
+                    report["filled_fields"].append({
+                        "label": stripped,
+                        "location": f"{location_prefix}, p{pi}",
+                        "field_key": "apply_date",
+                        "value": apply_date_val,
+                        "section": "applicant",
+                    })
+                    filled += 1
+                else:
+                    report["skipped_fields"].append({
+                        "label": stripped,
+                        "location": f"{location_prefix}, p{pi}",
+                        "reason": reason_dt,
+                    })
             continue
 
         # 2) 인라인 신청인 성명 + 서명란 (성명 뒤에 충분한 빈칸이 있고 '(서명'으로 끝나는 경우만)
-        # 예: '신청인(대리신청인) :                (서명)' / '신청인(대리 신청인2)) 성명 :        (서명 또는 인)'
         m_sig = re.match(
-            r"^(\s*신청인(?:\([^)]*\)|[2)]\))*\s*(?:성\s*명)?\s*:)(\s{6,})(\(서명(?:\s*또는\s*(?:인|날인))?\)\s*)$",
+            r"^(\s*신청인(?:\([^)]*\)|[2)]\))*\s*(?:성\s*명)?\s*:)([ \u00a0\u3000_]{2,})(\(서명(?:\s*또는\s*(?:인|날인))?\)\s*)$",
             raw,
         )
         if m_sig:
             prefix, mid_ws, suffix = m_sig.group(1), m_sig.group(2), m_sig.group(3)
+            prev_ctx = context_hint + " " + ("".join(paragraphs[pi - 1].xpath(".//*[local-name()='t']/text()")) if pi > 0 else "")
+            if fm.OFFICIAL_INLINE_CTX_RE.search(prev_ctx + " " + prefix):
+                report["skipped_fields"].append({
+                    "label": prefix.strip(),
+                    "location": f"{location_prefix}, p{pi}",
+                    "reason": "excluded_section",
+                })
+                continue
             app_name = (profile.get("applicant.name") or "").strip()
-            # 단, '성명'이 이미 명시된 경우에만 이름을 넣거나, ':' 바로 뒤 앞부분에 이름 넣고 뒷부분은 서명 여백으로 유지
-            if app_name and ("성명" in prefix or "성 명" in prefix or len(mid_ws) >= 12):
-                # 앞부분에 이름만 넣고 뒤 공백과 (서명...)은 그대로 유지
-                if _insert_into_inline_whitespace(p_el, ":", app_name):
+            if not app_name:
+                continue
+            if fm.slot_width_spaces(mid_ws) < 1 + fm.display_width_spaces(app_name) + 1:
+                report["skipped_fields"].append({
+                    "label": prefix.strip(),
+                    "location": f"{location_prefix}, p{pi}",
+                    "reason": "no_room",
+                })
+                continue
+            if "성명" in prefix or "성 명" in prefix or fm.slot_width_spaces(mid_ws) >= 12:
+                ok_nm, reason_nm = _replace_slot_after(p_el, ":", app_name, leading_space=True, min_keep=1)
+                if ok_nm:
                     report["filled_fields"].append({
                         "label": prefix.strip(),
                         "location": f"{location_prefix}, p{pi}",
@@ -259,6 +403,12 @@ def _fill_inline_paragraphs(
                         "reason": "signature_kept_blank",
                     })
                     filled += 1
+                else:
+                    report["skipped_fields"].append({
+                        "label": prefix.strip(),
+                        "location": f"{location_prefix}, p{pi}",
+                        "reason": reason_nm,
+                    })
             continue
 
         if "신청인과의 관계" in stripped and "대리" in stripped:
@@ -366,6 +516,7 @@ def fill_hwpx_bytes(
             report["error"] = "hwpx_no_sections"
             return data, report
 
+        char_pr_heights, doc_default_cid = _parse_char_pr_heights(zin)
         updated_sections: dict[str, bytes] = {}
         filled_tcs: set[int] = set()
 
@@ -382,16 +533,42 @@ def fill_hwpx_bytes(
 
             _fill_inline_paragraphs(root.xpath("./*[local-name()='p']"), prof, f"{sec_name} top", report)
 
+            # 각 표 직전 본문 문단 제목 추적 (명부 등 제외 구역 표 판별)
+            body_ps = root.xpath("./*[local-name()='p']")
+            table_prev_text: dict[int, str] = {}
+            recent_texts: list[str] = []
+            for bp in body_ps:
+                for sub_tbl in bp.xpath(".//*[local-name()='tbl']"):
+                    table_prev_text[id(sub_tbl)] = " ".join(recent_texts[-2:])
+                bt = "".join(t for t in bp.xpath("./*[local-name()='run']/*[local-name()='t']/text()")).strip()
+                if bt:
+                    recent_texts.append(bt)
+
             for ti, tbl in enumerate(tables):
                 cells, grid, max_r, max_c = _parse_table(tbl)
                 row_map: dict[int, list[CellInfo]] = {}
                 for ci in cells:
                     row_map.setdefault(ci.row, []).append(ci)
 
-                tbl_section = "applicant"
+                prev_title = table_prev_text.get(id(tbl), "")
+                tbl_section = "excluded" if fm.detect_section_context(prev_title, current="keep") == "excluded" else "applicant"
                 for r in range(max_r):
                     row_cells = sorted(row_map.get(r, []), key=lambda x: x.col)
                     tbl_section = _row_section_context(row_cells, grid, r, tbl_section)
+                    # 넓은 제목 행 판별 (같은 행 모든 셀을 합쳐 판단)
+                    if any(rc.col_span >= max(3, max_c // 2) for rc in row_cells):
+                        row_joined = " ".join(rc.text for rc in row_cells if rc.text)
+                        if row_joined and len(row_joined) <= 120:
+                            wsec = fm.detect_section_context(row_joined, current="keep")
+                            if wsec != "keep":
+                                tbl_section = wsec
+
+                    row_head_c0 = grid.get((r, 0))
+                    row_head_norm = fm.normalize_label(row_head_c0.text) if row_head_c0 and row_head_c0.text else ""
+                    row_only_excluded = bool(
+                        fm.EXCLUDED_ROW_HEAD_RE.match(row_head_norm)
+                        or re.fullmatch(r"성명(?:여성|남성)", row_head_norm)
+                    )
 
                     # 같은 행/인접 구역에 '휴대전화'가 별도로 존재하는지 확인 (일반 '전화번호' 중복 기입 방지)
                     has_mobile_in_band = any(
@@ -404,26 +581,33 @@ def fill_hwpx_bytes(
                         txt = ci.text
                         if not txt:
                             continue
+                        cur_sec = "excluded" if row_only_excluded else tbl_section
 
                         # 단일 셀 내 인라인 서명/날짜 블록 처리
                         if "년" in txt and "월" in txt and "일" in txt and len(txt) >= 10:
-                            # 왼쪽 셀(같은 행)의 문맥 확인 (예: 출산(예정)일!)
                             left_ctx = " ".join(
                                 c2.text for c2 in row_cells if c2.col < ci.col and c2.text
                             )
-                            cell_ps = ci.tc.xpath("./*[local-name()='subList']/*[local-name()='p']")
-                            _fill_inline_paragraphs(
-                                cell_ps,
-                                prof,
-                                f"{sec_name} T{ti}({ci.row},{ci.col})",
-                                report,
-                                context_hint=left_ctx,
-                            )
+                            if cur_sec == "excluded" or fm.OFFICIAL_INLINE_CTX_RE.search(left_ctx + " " + txt):
+                                report["skipped_fields"].append({
+                                    "label": txt.replace("\n", " ")[:40],
+                                    "location": f"{sec_name} T{ti}({ci.row},{ci.col})",
+                                    "reason": "excluded_section",
+                                })
+                            else:
+                                cell_ps = ci.tc.xpath("./*[local-name()='subList']/*[local-name()='p']")
+                                _fill_inline_paragraphs(
+                                    cell_ps,
+                                    prof,
+                                    f"{sec_name} T{ti}({ci.row},{ci.col})",
+                                    report,
+                                    context_hint=left_ctx,
+                                )
 
                         if len(txt) > 60:
                             continue
 
-                        decision = fm.match_label(txt, section=tbl_section, profile=prof)
+                        decision = fm.match_label(txt, section=cur_sec, profile=prof)
                         if decision.action == "skip" and decision.reason in ("empty_or_too_long_label", "unmatched_label"):
                             continue
 
@@ -473,6 +657,17 @@ def fill_hwpx_bytes(
                                 and below_ci.col_span == ci.col_span
                                 and fm.is_cell_empty(below_ci.text)
                             ):
+                                rh_below = grid.get((below_ci.row, 0))
+                                rh_norm = fm.normalize_label(rh_below.text) if rh_below and rh_below.text else ""
+                                if fm.EXCLUDED_ROW_HEAD_RE.match(rh_norm) or (
+                                    rh_below and fm.detect_section_context(rh_below.text, current="keep") == "excluded"
+                                ):
+                                    report["skipped_fields"].append({
+                                        "label": txt.replace("\n", " "),
+                                        "location": f"{sec_name} T{ti}({below_ci.row},{below_ci.col})",
+                                        "reason": "excluded_section",
+                                    })
+                                    continue
                                 target_ci = below_ci
 
                         if target_ci is None:
@@ -487,7 +682,24 @@ def fill_hwpx_bytes(
                         if id(target_ci.tc) in filled_tcs:
                             continue
 
-                        if _set_tc_text(target_ci.tc, decision.value or ""):
+                        override_cid: str | None = None
+                        target_cid = _tc_char_pr_id(target_ci.tc)
+                        target_h = char_pr_heights.get(target_cid) if target_cid is not None else None
+                        if target_h is not None and target_h < 700:
+                            lbl_cid = _tc_char_pr_id(ci.tc)
+                            if lbl_cid is not None and char_pr_heights.get(lbl_cid, 0) >= 700:
+                                override_cid = lbl_cid
+                            elif doc_default_cid is not None:
+                                override_cid = doc_default_cid
+                            else:
+                                report["skipped_fields"].append({
+                                    "label": txt.replace("\n", " "),
+                                    "location": f"{sec_name} T{ti}({target_ci.row},{target_ci.col})",
+                                    "reason": "tiny_font",
+                                })
+                                continue
+
+                        if _set_tc_text(target_ci.tc, decision.value or "", override_char_pr_id=override_cid):
                             filled_tcs.add(id(target_ci.tc))
                             target_ci.text = decision.value or ""
                             report["filled_fields"].append({
