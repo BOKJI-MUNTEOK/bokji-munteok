@@ -1,7 +1,8 @@
 """HWP 5.0 서식 자동 기입 엔진 (Java hwplib subprocess 래퍼).
 
 보안·안정성 원칙:
-- 요청마다 임시 디렉터리(tempfile.TemporaryDirectory) 안에서만 in.hwp, plan.json, out.hwp를 처리하고 즉시 삭제.
+- 요청마다 임시 디렉터리(tempfile.TemporaryDirectory) 안에서만 in.hwp, out.hwp를 처리하고 즉시 삭제하며,
+  개인정보가 들어갈 수 있는 기입 계획 JSON은 디스크 파일 대신 표준 입력(stdin)으로만 전달한다.
 - 표준 출력·로그에 사용자 개인정보를 출력하지 않는다.
 - java 또는 hwplib 런타임이 없거나 실행 실패/타임아웃(기본 20초) 시 손상된 파일 대신 원본 바이트를 그대로 반환한다.
 """
@@ -88,7 +89,6 @@ def fill_hwp_bytes(
     with tempfile.TemporaryDirectory(prefix="bokji_hwp_") as tmpdir:
         tmp = Path(tmpdir)
         in_path = tmp / "in.hwp"
-        plan_path = tmp / "plan.json"
         out_path = tmp / "out.hwp"
         in_path.write_bytes(data)
 
@@ -137,11 +137,11 @@ def fill_hwp_bytes(
             {"cell_edits": plan["cell_edits"], "para_edits": plan["para_edits"]},
             ensure_ascii=False,
         )
-        plan_path.write_text(plan_payload, encoding="utf-8")
 
         try:
             res = subprocess.run(
-                [java_bin, "-cp", classpath, "HwpLibTool", "fill", str(in_path), str(plan_path), str(out_path)],
+                [java_bin, "-cp", classpath, "HwpLibTool", "fill", str(in_path), "-", str(out_path)],
+                input=plan_payload,
                 capture_output=True,
                 text=True,
                 encoding="utf-8",

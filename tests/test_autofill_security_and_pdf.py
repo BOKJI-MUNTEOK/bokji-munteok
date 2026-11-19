@@ -356,18 +356,18 @@ class TestAutofillSecurityAndEngines(unittest.TestCase):
                 "contact": "129",
                 "link": "",
                 "form_files": [
-                    {"name": "지원신청서.hwpx", "url": "https://example.invalid/a.hwpx"},
-                    {"name": "소득확인서식.xlsx", "url": "https://example.invalid/b.xlsx"},
-                    {"name": "사업공고문.pdf", "url": "https://example.invalid/c.pdf"},
+                    {"name": "지원신청서.hwpx", "url": "https://www.bokjiro.go.kr/test/a.hwpx"},
+                    {"name": "소득확인서식.xlsx", "url": "https://www.bokjiro.go.kr/test/b.xlsx"},
+                    {"name": "사업공고문.pdf", "url": "https://bokjiro.go.kr/test/c.pdf"},
                 ],
             },
             "ai": None,
             "ext": {"documents": ["신분증"]},
         }
         files = {
-            "https://example.invalid/a.hwpx": hwpx_raw,
-            "https://example.invalid/b.xlsx": xlsx_raw,
-            "https://example.invalid/c.pdf": ref_raw,
+            "https://www.bokjiro.go.kr/test/a.hwpx": hwpx_raw,
+            "https://www.bokjiro.go.kr/test/b.xlsx": xlsx_raw,
+            "https://bokjiro.go.kr/test/c.pdf": ref_raw,
         }
         p = {"name": "홍길동", "sido": "서울특별시", "sgg": "구로구", "age": 76}
         extra = {
@@ -533,6 +533,111 @@ class TestAutofillSecurityAndEngines(unittest.TestCase):
                 names = zout.namelist()
                 self.assertTrue(any(n.startswith("1_신청준비_") and n.endswith(".pdf") for n in names))
                 self.assertTrue(any(n.startswith("2_기관양식(작성해서 제출)/작성됨_") for n in names))
+
+    def test_packet_download_domain_and_redirect_allowlist(self) -> None:
+        class _FakeResp:
+            def __init__(self, body: bytes, final_url: str) -> None:
+                self._body = body
+                self._final_url = final_url
+
+            def read(self, _n: int = -1) -> bytes:
+                return self._body
+
+            def geturl(self) -> str:
+                return self._final_url
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+        # 1. 허용 주소(www.bokjiro.go.kr / bokjiro.go.kr HTTPS) 통과
+        for ok_url in (
+            "https://www.bokjiro.go.kr/ssis-tbu/CmmFileUtil/siteQnaInfoDownload.do?atcflId=1",
+            "https://bokjiro.go.kr/ssis-tbu/CmmFileUtil/getDownload.do?atcflId=2",
+        ):
+            self.assertEqual(packet.validate_download_url(ok_url), ok_url)
+            with patch("urllib.request.urlopen", return_value=_FakeResp(b"%PDF-1.4\n", ok_url)) as mock_open:
+                data = packet.download(ok_url)
+                self.assertEqual(data, b"%PDF-1.4\n")
+                mock_open.assert_called_once()
+
+        # 2. 비허용 scheme/도메인/우회 주소 거부(오류 메시지에 URL 미포함, urlopen 미호출)
+        bad_urls = (
+            "http://www.bokjiro.go.kr/a.hwp",
+            "http://bokjiro.go.kr/a.hwp",
+            "https://evil.com/a.hwp",
+            "https://bokjiro.go.kr.evil.com/a.hwp",
+            "https://sub.bokjiro.go.kr/a.hwp",
+            "https://x@evil.com/a.hwp",
+            "https://www.bokjiro.go.kr@evil.com/a.hwp",
+            "https://x@www.bokjiro.go.kr/a.hwp",
+            "https://www.bokjiro.go.kr:8443/a.hwp",
+        )
+        for bad_url in bad_urls:
+            with patch("urllib.request.urlopen") as mock_open:
+                with self.assertRaises(ValueError) as cm:
+                    packet.download(bad_url)
+                self.assertEqual(str(cm.exception), "허용되지 않은 주소")
+                self.assertNotIn("evil", str(cm.exception))
+                mock_open.assert_not_called()
+
+        # 3. 리다이렉트 뒤 최종 주소가 비허용 도메인/HTTP로 바뀌면 거부
+        for redir_url in ("https://evil.com/redir.hwp", "http://www.bokjiro.go.kr/redir.hwp"):
+            with patch(
+                "urllib.request.urlopen",
+                return_value=_FakeResp(b"data", redir_url),
+            ):
+                with self.assertRaises(ValueError) as cm:
+                    packet.download("https://www.bokjiro.go.kr/start.hwp")
+                self.assertEqual(str(cm.exception), "허용되지 않은 주소")
+
+        # 4. build_zip은 거부된 서식을 원본 대신 '직접 작성 필요'로 안내
+        sec_xml = (
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            '<hs:sec xmlns:hs="http://www.hancom.co.kr/hwpml/2011/section" '
+            'xmlns:hp="http://www.hancom.co.kr/hwpml/2011/paragraph">'
+            '<hp:p><hp:run><hp:t>신청인 :               (서명)</hp:t></hp:run></hp:p>'
+            '</hs:sec>'
+        ).encode("utf-8")
+        hwpx_raw = _make_minimal_hwpx(sec_xml)
+        row = {
+            "svc": {
+                "servId": "TEST_DOMAIN_01",
+                "servNm": "도메인검증서비스",
+                "org": "구로구",
+                "region": "서울특별시 구로구",
+                "contact": "129",
+                "link": "",
+                "form_files": [
+                    {"name": "허용신청서.hwpx", "url": "https://www.bokjiro.go.kr/ok.hwpx"},
+                    {"name": "외부서식신청서.hwp", "url": "https://bokjiro.go.kr.evil.com/bad.hwp"},
+                ],
+            },
+            "ai": None,
+            "ext": {"documents": ["신분증"]},
+        }
+        seen_fetch_urls: list[str] = []
+
+        def _fake_fetch(url: str) -> bytes:
+            seen_fetch_urls.append(url)
+            return hwpx_raw
+
+        zip_bytes, failed = packet.build_zip(row, {"name": "홍길동"}, {}, fetch=_fake_fetch)
+        self.assertEqual(seen_fetch_urls, ["https://www.bokjiro.go.kr/ok.hwpx"])
+        self.assertEqual(failed, ["외부서식신청서.hwp"])
+        with zipfile.ZipFile(io.BytesIO(zip_bytes), "r") as zout:
+            names = zout.namelist()
+            self.assertIn("2_기관양식(작성해서 제출)/작성됨_허용신청서.hwpx", names)
+            self.assertNotIn("2_기관양식(작성해서 제출)/외부서식신청서.hwp", names)
+            self.assertIn("내려받지_못한_파일.txt", names)
+            self.assertNotIn("evil.com", zout.read("내려받지_못한_파일.txt").decode("utf-8"))
+            pdf_name = next(n for n in names if n.startswith("1_신청준비_") and n.endswith(".pdf"))
+            with pdfplumber.open(io.BytesIO(zout.read(pdf_name))) as pdf:
+                full_text = "\n".join((pg.extract_text() or "") for pg in pdf.pages)
+                self.assertIn("직접 작성 필요", full_text)
+                self.assertIn("외부서식신청서.hwp", full_text)
 
 
 if __name__ == "__main__":

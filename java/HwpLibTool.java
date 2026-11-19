@@ -28,7 +28,7 @@ import java.util.regex.Pattern;
 public class HwpLibTool {
     public static void main(String[] args) throws Exception {
         if (args.length < 2) {
-            System.err.println("Usage: inspect <in.hwp> | fill <in.hwp> <plan.json> <out.hwp>");
+            System.err.println("Usage: inspect <in.hwp> | fill <in.hwp> <plan.json|-> <out.hwp>");
             System.exit(2);
         }
         String cmd = args[0];
@@ -37,11 +37,13 @@ public class HwpLibTool {
             System.out.println(inspectToJson(hwp));
         } else if ("fill".equals(cmd)) {
             if (args.length < 4) {
-                System.err.println("Usage: fill <in.hwp> <plan.json> <out.hwp>");
+                System.err.println("Usage: fill <in.hwp> <plan.json|-> <out.hwp>");
                 System.exit(2);
             }
             HWPFile hwp = HWPReader.fromFile(args[1]);
-            String jsonSrc = Files.readString(Path.of(args[2]), StandardCharsets.UTF_8);
+            String jsonSrc = "-".equals(args[2])
+                    ? new String(System.in.readAllBytes(), StandardCharsets.UTF_8)
+                    : Files.readString(Path.of(args[2]), StandardCharsets.UTF_8);
             @SuppressWarnings("unchecked")
             Map<String, Object> plan = (Map<String, Object>) new MiniJsonParser(jsonSrc).parseValue();
             int applied = applyPlan(hwp, plan);

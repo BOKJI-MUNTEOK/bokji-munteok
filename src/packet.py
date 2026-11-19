@@ -7,6 +7,7 @@
 """
 import io
 import re
+import urllib.parse
 import urllib.request
 import zipfile
 from datetime import date
@@ -21,6 +22,7 @@ FONTS = Path(__file__).resolve().parent.parent / "assets" / "fonts"
 SELF = "(직접 작성)"
 FORM_WORDS = r"신청.{0,6}서|서식|동의서|위임장|확인서|신고서|양식|청약서"
 MAX_BYTES = 20 * 1024 * 1024  # 이보다 큰 안내 자료는 ZIP에 넣지 않고 주소만 남긴다
+ALLOWED_DOWNLOAD_HOSTS = frozenset({"www.bokjiro.go.kr", "bokjiro.go.kr"})
 
 
 def is_form(name: str) -> bool:
@@ -28,9 +30,35 @@ def is_form(name: str) -> bool:
     return bool(re.search(FORM_WORDS, name))
 
 
+def validate_download_url(url: str) -> str:
+    """서식 다운로드 주소를 검증한다. 복지로 HTTPS 도메인만 허용하며 실패 시 주소를 노출하지 않는다."""
+    if not isinstance(url, str) or any(ord(ch) < 32 for ch in url):
+        raise ValueError("허용되지 않은 주소")
+    cleaned = url.strip()
+    if not cleaned:
+        raise ValueError("허용되지 않은 주소")
+    parsed = urllib.parse.urlsplit(cleaned)
+    if parsed.scheme.lower() != "https":
+        raise ValueError("허용되지 않은 주소")
+    if parsed.username is not None or parsed.password is not None or "@" in parsed.netloc:
+        raise ValueError("허용되지 않은 주소")
+    try:
+        port = parsed.port
+    except ValueError:
+        raise ValueError("허용되지 않은 주소") from None
+    if port not in (None, 443):
+        raise ValueError("허용되지 않은 주소")
+    host = (parsed.hostname or "").lower()
+    if host not in ALLOWED_DOWNLOAD_HOSTS or parsed.netloc.lower() not in (host, f"{host}:443"):
+        raise ValueError("허용되지 않은 주소")
+    return cleaned
+
+
 def download(url: str, timeout: int = 15) -> bytes:
-    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+    safe_url = validate_download_url(url)
+    req = urllib.request.Request(safe_url, headers={"User-Agent": "Mozilla/5.0"})
     with urllib.request.urlopen(req, timeout=timeout) as r:
+        validate_download_url(r.geturl())
         data = r.read(MAX_BYTES + 1)
     if len(data) > MAX_BYTES:
         raise ValueError("파일이 너무 큼")
@@ -226,7 +254,9 @@ def build_zip(row: dict, p: dict | None, extra: dict, fetch=None) -> tuple[bytes
         fetch = download
     s = row["svc"]
     profile = fill_form.build_profile(p, extra)
-    buf, failed = io.BytesIO(), []
+    buf = io.BytesIO()
+    failed: list[str] = []
+    failed_entries: list[tuple[str, str, bool]] = []
     attachments: list[tuple[str, bytes]] = []
     filled_forms: list[str] = []
     manual_forms: list[tuple[str, str]] = []
@@ -238,9 +268,21 @@ def build_zip(row: dict, p: dict | None, extra: dict, fetch=None) -> tuple[bytes
             continue
         seen.add(f["url"])
         try:
-            raw = fetch(f["url"])
+            safe_url = validate_download_url(f["url"])
+            raw = fetch(safe_url)
+        except ValueError as exc:
+            is_disallowed = "허용되지 않은 주소" in str(exc)
+            failed.append(f["name"])
+            failed_entries.append((f["name"], f["url"], is_disallowed))
+            if is_form(f["name"]):
+                reason = "허용되지 않은 주소 · 복지로에서 직접 받아 작성" if is_disallowed else "내려받지 못함 · 복지로에서 직접 받아 작성"
+                manual_forms.append((f["name"], reason))
+            continue
         except Exception:  # 복지로 응답이 없으면 주소만 남긴다
             failed.append(f["name"])
+            failed_entries.append((f["name"], f["url"], False))
+            if is_form(f["name"]):
+                manual_forms.append((f["name"], "내려받지 못함 · 복지로에서 직접 받아 작성"))
             continue
 
         if is_form(f["name"]):
@@ -264,7 +306,13 @@ def build_zip(row: dict, p: dict | None, extra: dict, fetch=None) -> tuple[bytes
         )
         for arcname, payload in attachments:
             z.writestr(arcname, payload)
-        if failed:
-            z.writestr("내려받지_못한_파일.txt", "용량이 크거나 복지로에서 받지 못한 파일이에요. 아래 주소로 직접 받아 주세요.\n\n"
-                       + "\n".join(f"{f['name']}\n{f['url']}\n" for f in s["form_files"] if f["name"] in failed))
+        if failed_entries:
+            lines = [
+                f"{fname}\n(허용되지 않은 주소라 내려받지 않았습니다)\n" if rejected else f"{fname}\n{furl}\n"
+                for fname, furl, rejected in failed_entries
+            ]
+            z.writestr(
+                "내려받지_못한_파일.txt",
+                "용량이 크거나 복지로에서 받지 못한 파일이에요. 아래 주소로 직접 받아 주세요.\n\n" + "\n".join(lines),
+            )
     return buf.getvalue(), failed
