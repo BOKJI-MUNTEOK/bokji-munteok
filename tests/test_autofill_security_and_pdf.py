@@ -1217,6 +1217,16 @@ class TestAutofillSecurityAndEngines(unittest.TestCase):
             self.assertIn('itemCnt="3"', hdr_out)
             self.assertIn('charPrIDRef="2"', sec_out)
 
+    def test_refund_account_header_row_fills_every_column(self) -> None:
+        # 머리 행(성 명·금융기관명·계좌번호·예금주) 아래 빈 값 행: 방금 채운 왼쪽 값 칸을 라벨로 보지 않아 네 칸 모두 채운다(2026-11-19 운영 E2E 026_3).
+        sec_xml = '<?xml version="1.0" encoding="UTF-8"?><hs:sec xmlns:hs="http://www.hancom.co.kr/hwpml/2011/section" xmlns:hp="http://www.hancom.co.kr/hwpml/2011/paragraph"><hp:p><hp:run><hp:tbl><hp:tr><hp:tc><hp:cellAddr colAddr="0" rowAddr="0"/><hp:cellSpan colSpan="1" rowSpan="2"/><hp:subList><hp:p><hp:run><hp:t>본인부담금 환급계좌</hp:t></hp:run></hp:p></hp:subList></hp:tc><hp:tc><hp:cellAddr colAddr="1" rowAddr="0"/><hp:cellSpan colSpan="1" rowSpan="1"/><hp:subList><hp:p><hp:run><hp:t>성 명</hp:t></hp:run></hp:p></hp:subList></hp:tc><hp:tc><hp:cellAddr colAddr="2" rowAddr="0"/><hp:cellSpan colSpan="1" rowSpan="1"/><hp:subList><hp:p><hp:run><hp:t>금융기관명</hp:t></hp:run></hp:p></hp:subList></hp:tc><hp:tc><hp:cellAddr colAddr="3" rowAddr="0"/><hp:cellSpan colSpan="1" rowSpan="1"/><hp:subList><hp:p><hp:run><hp:t>계좌번호</hp:t></hp:run></hp:p></hp:subList></hp:tc><hp:tc><hp:cellAddr colAddr="4" rowAddr="0"/><hp:cellSpan colSpan="1" rowSpan="1"/><hp:subList><hp:p><hp:run><hp:t>예금주</hp:t></hp:run></hp:p></hp:subList></hp:tc></hp:tr><hp:tr><hp:tc><hp:cellAddr colAddr="1" rowAddr="1"/><hp:cellSpan colSpan="1" rowSpan="1"/><hp:subList><hp:p><hp:run><hp:t></hp:t></hp:run></hp:p></hp:subList></hp:tc><hp:tc><hp:cellAddr colAddr="2" rowAddr="1"/><hp:cellSpan colSpan="1" rowSpan="1"/><hp:subList><hp:p><hp:run><hp:t></hp:t></hp:run></hp:p></hp:subList></hp:tc><hp:tc><hp:cellAddr colAddr="3" rowAddr="1"/><hp:cellSpan colSpan="1" rowSpan="1"/><hp:subList><hp:p><hp:run><hp:t></hp:t></hp:run></hp:p></hp:subList></hp:tc><hp:tc><hp:cellAddr colAddr="4" rowAddr="1"/><hp:cellSpan colSpan="1" rowSpan="1"/><hp:subList><hp:p><hp:run><hp:t></hp:t></hp:run></hp:p></hp:subList></hp:tc></hp:tr></hp:tbl></hp:run></hp:p></hs:sec>'.encode("utf-8")
+        _, rep = fill_hwpx.fill_hwpx_bytes(_make_minimal_hwpx(sec_xml))
+        keys = sorted(f["field_key"] for f in rep["filled_fields"])
+        self.assertIn("account.bank", keys)
+        self.assertIn("account.number", keys)
+        self.assertIn("account.holder", keys)
+        self.assertEqual(rep["filled_count"], 4)
+
     def test_fix_09_multiline_body_skipped_except_date(self) -> None:
         doc_dump = {
             "default_char_shape_id": 0,

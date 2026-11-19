@@ -1139,7 +1139,13 @@ def fill_hwpx_bytes(
                                 above_h = grid.get((ci.row - 1, ci.col)) if ci.row > 0 else None
                                 above_sec = fm.detect_section_context(above_h.text, current="keep") if above_h and above_h.text else "keep"
                                 left_b = grid.get((below_ci.row, below_ci.col - 1)) if below_ci.col > 0 else None
-                                left_b_busy = bool(left_b is not None and left_b.row_span == 1 and not fm.is_cell_empty(left_b.text))
+                                # 왼쪽 칸이 원래 라벨일 때만 막는다. 방금 이 함수가 채운 값 칸(예: 성명 → 홍길동)은 라벨이 아니다.
+                                left_b_busy = bool(
+                                    left_b is not None
+                                    and left_b.row_span == 1
+                                    and id(left_b.tc) not in filled_tcs
+                                    and not fm.is_cell_empty(left_b.text)
+                                )
                                 rh_below = grid.get((below_ci.row, 0))
                                 rh_norm = fm.normalize_label(rh_below.text) if rh_below and rh_below.text else ""
                                 rh_sec = fm.detect_section_context(rh_below.text, current="keep") if rh_below and rh_below.text else "keep"
