@@ -11,6 +11,7 @@ import altair as alt
 import pandas as pd
 import streamlit as st
 
+import appearance
 import evaluate
 import intake
 import llm
@@ -26,10 +27,12 @@ from welfare_store import StoreError
 
 BRAND = "복지문턱"
 LOGO = Path(__file__).resolve().parent / "assets" / "logo"
-st.set_page_config(page_title=BRAND, page_icon=str(LOGO / "mark.svg"), layout="wide")
+st.set_page_config(page_title=BRAND, page_icon=str(LOGO / "mark.svg"), layout="wide",
+                   menu_items={"Get Help": None, "Report a bug": None, "About": None})
+appearance.render()
 st.markdown("""
 <style>
-.site-foot{margin-top:56px;padding:16px 0 4px;border-top:1px solid #E5E8EB;font-size:.8rem;line-height:1.6;color:#8B95A1}
+.site-foot{margin-top:56px;padding:16px 0 4px;border-top:1px solid var(--bm-divider,#E5E8EB);font-size:.8rem;line-height:1.6;color:var(--bm-faint,#8B95A1)}
 [data-testid=stMainBlockContainer]{padding-top:2.2rem}
 [data-testid=stMain]{overflow-x:hidden}
 [data-testid=InputInstructions]{display:none}  /* 'Press Enter to apply' 영어 안내: 칸 밖을 누르거나 다음을 눌러도 적용된다 */
@@ -40,70 +43,71 @@ st.markdown("""
 [data-testid=stSidebarNav] a{transition:background-color .15s ease}
 @media (prefers-reduced-motion:reduce){[data-testid=stMain] [data-testid=stVerticalBlock]>*{animation:none}}
 .st-key-home_hero{padding:28px 4px 8px}
-.home-tag{display:inline-block;font-size:.85rem;font-weight:600;color:#256EF4;margin-bottom:12px}
-.home-t{font-size:2.3rem;font-weight:700;color:#191F28;line-height:1.38;letter-spacing:-.03em}
-.home-s{font-size:1.06rem;font-weight:500;color:#4E5968;margin:14px 0 22px;letter-spacing:-.01em}
-.home-meta{font-size:.85rem;color:#8B95A1;margin-top:2px}
+.home-tag{display:inline-block;font-size:.85rem;font-weight:600;color:var(--bm-accent,#256EF4);margin-bottom:12px}
+.home-t{font-size:2.3rem;font-weight:700;color:var(--bm-text,#191F28);line-height:1.38;letter-spacing:-.03em}
+.home-s{font-size:1.06rem;font-weight:500;color:var(--bm-secondary,#4E5968);margin:14px 0 22px;letter-spacing:-.01em}
+.home-meta{font-size:.85rem;color:var(--bm-faint,#8B95A1);margin-top:2px}
 .st-key-home_start button{min-height:44px;padding:0 30px;border-radius:999px;font-size:.98rem;font-weight:600}
-.st-key-home_all button{font-size:1rem;color:#256EF4}
-.sec-t{font-size:1.2rem;font-weight:700;color:#191F28;letter-spacing:-.02em;margin:34px 0 10px}
-.st-key-home_quick button{min-height:52px;padding:8px 10px;border:none;border-radius:12px;background:#F2F4F6;color:#333D4B;font-size:.95rem;font-weight:600}
+.st-key-home_all button{font-size:1rem;color:var(--bm-accent,#256EF4)}
+.sec-t{font-size:1.2rem;font-weight:700;color:var(--bm-text,#191F28);letter-spacing:-.02em;margin:34px 0 10px}
+.st-key-home_quick button{min-height:52px;padding:8px 10px;border:none;border-radius:12px;background:var(--bm-soft-neutral,#F2F4F6);color:var(--bm-quick-text,#333D4B);font-size:.95rem;font-weight:600}
 .st-key-home_quick button>div{flex-direction:column;gap:6px}
-.st-key-home_quick button [data-testid=stIconMaterial]{font-size:1.2rem;color:#256EF4}
-.st-key-home_quick button:hover{background:#E8F3FF;color:#191F28}
-.steps{display:grid;grid-template-columns:repeat(3,1fr);gap:28px;border-top:1px solid #E5E8EB;padding-top:18px}
-.steps .n{display:inline-block;width:24px;height:24px;border-radius:50%;background:#191F28;color:#fff;font-size:.8rem;font-weight:700;text-align:center;line-height:24px;margin-right:8px}
-.steps b{font-size:1.02rem;color:#191F28}
-.steps p{font-size:.92rem;color:#6B7684;margin:6px 0 0 32px}
+.st-key-home_quick button [data-testid=stIconMaterial]{font-size:1.2rem;color:var(--bm-accent,#256EF4)}
+.st-key-home_quick button:hover{background:var(--bm-hover,#E8F3FF);color:var(--bm-text,#191F28)}
+.steps{display:grid;grid-template-columns:repeat(3,1fr);gap:28px;border-top:1px solid var(--bm-divider,#E5E8EB);padding-top:18px}
+.steps .n{display:inline-block;width:24px;height:24px;border-radius:50%;background:var(--bm-number-bg,#191F28);color:var(--bm-number-text,#fff);font-size:.8rem;font-weight:700;text-align:center;line-height:24px;margin-right:8px}
+.steps b{font-size:1.02rem;color:var(--bm-text,#191F28)}
+.steps p{font-size:.92rem;color:var(--bm-subtle,#6B7684);margin:6px 0 0 32px}
 @media (max-width:640px){.steps{grid-template-columns:1fr}.home-t{font-size:1.8rem}}
-.st-key-chatbox{background:#F7F8FA}
+.st-key-chatbox{background:var(--bm-chat-bg,#F7F8FA)}
 .st-key-chatbox [data-testid=stChatMessage]{background:transparent;padding:2px 0;gap:10px;align-items:flex-start}
 .st-key-chatbox [data-testid=stChatMessageContent]{flex:0 1 auto;width:fit-content;max-width:80%;margin:0 !important;padding:10px 14px;line-height:1.6;
-  background:#fff;border:1px solid #DDE1E6;border-radius:4px 16px 16px 16px}
+  background:var(--bm-surface,#fff);border:1px solid var(--bm-border,#DDE1E6);border-radius:4px 16px 16px 16px}
 .st-key-chatbox [data-testid=stChatMessage]:has([data-testid=stChatMessageAvatarUser]){flex-direction:row-reverse}
 .st-key-chatbox [data-testid=stChatMessage]:has([data-testid=stChatMessageAvatarUser]) [data-testid=stChatMessageContent]{
-  background:#256EF4;border-color:#256EF4;border-radius:16px 4px 16px 16px;color:#fff}
-.st-key-chatbox [data-testid=stChatMessage]:has([data-testid=stChatMessageAvatarUser]) [data-testid=stChatMessageContent] *{color:#fff}
-.st-key-chatbox [data-testid=stChatMessageAvatarUser]{background:#E8F3FF;color:#256EF4}
-.st-key-chatbox [data-testid=stChatMessageAvatarUser] *{color:#256EF4}
+  background:var(--bm-action,#256EF4);border-color:var(--bm-accent,#256EF4);border-radius:16px 4px 16px 16px;color:var(--bm-on-action,#fff)}
+.st-key-chatbox [data-testid=stChatMessage]:has([data-testid=stChatMessageAvatarUser]) [data-testid=stChatMessageContent] *{color:var(--bm-on-action,#fff)}
+.st-key-chatbox [data-testid=stChatMessageAvatarUser]{background:var(--bm-hover,#E8F3FF);color:var(--bm-accent,#256EF4)}
+.st-key-chatbox [data-testid=stChatMessageAvatarUser] *{color:var(--bm-accent,#256EF4)}
 .st-key-chatbox [data-testid=stChatMessageContent] p{margin-bottom:.4em}
 .st-key-chatbox [data-testid=stChatMessageContent] p:last-child{margin-bottom:0}
 .st-key-chatbox [data-testid=stChatMessageContent] [data-testid=stMarkdownContainer]{margin:0}
-.crumb{font-size:.82rem;color:#6D7882;margin-bottom:4px}
-.page-t{font-size:1.75rem;font-weight:700;color:#1E2124;letter-spacing:-.5px;padding-bottom:12px;border-bottom:2px solid #063A74;margin-bottom:6px}
-.notice{font-size:.88rem;color:#464C53;margin:2px 0 6px}
-.notice b{color:#063A74}
-.q{font-size:1.4rem;font-weight:700;color:#063A74;margin:2px 0 10px;line-height:1.4}
+.crumb{font-size:.82rem;color:var(--bm-caption,#6D7882);margin-bottom:4px}
+.page-t{font-size:1.75rem;font-weight:700;color:var(--bm-text-strong,#1E2124);letter-spacing:-.5px;padding-bottom:12px;border-bottom:2px solid var(--bm-heading,#063A74);margin-bottom:6px}
+.notice{font-size:.88rem;color:var(--bm-muted,#464C53);margin:2px 0 6px}
+.notice b{color:var(--bm-heading,#063A74)}
+.q{font-size:1.4rem;font-weight:700;color:var(--bm-heading,#063A74);margin:2px 0 10px;line-height:1.4}
 .st-key-mode button{min-height:46px;font-size:1rem;font-weight:600}
-.st-key-mode button[aria-checked=true]{background:#256EF4 !important;color:#fff !important;border-color:#256EF4 !important}
-.st-key-quick{background:#F4F7FC;border:1px solid #DDE1E6;border-radius:8px;padding:16px 14px}
-.st-key-quick button{min-height:44px;font-weight:600;background:#fff;justify-content:flex-start}
-.st-key-quick button[data-testid=stBaseButton-primary]{background:#256EF4;color:#fff}
-.st-key-quick button:hover{border-color:#256EF4;color:#256EF4}
-h2,h3{color:#063A74}
+.st-key-mode button[aria-checked=true]{background:var(--bm-action,#256EF4) !important;color:var(--bm-on-action,#fff) !important;border-color:var(--bm-accent,#256EF4) !important}
+.st-key-quick{background:var(--bm-soft,#F4F7FC);border:1px solid var(--bm-border,#DDE1E6);border-radius:8px;padding:16px 14px}
+.st-key-quick button{min-height:44px;font-weight:600;background:var(--bm-surface,#fff);justify-content:flex-start}
+.st-key-quick button[data-testid=stBaseButton-primary]{background:var(--bm-action,#256EF4);color:var(--bm-on-action,#fff)}
+.st-key-quick button:hover{border-color:var(--bm-accent,#256EF4);color:var(--bm-accent,#256EF4)}
+.st-key-quick button[data-testid=stBaseButton-primary]:hover{color:var(--bm-on-action,#fff)}
+h2,h3{color:var(--bm-heading,#063A74)}
 .lead{font-size:1.12rem;margin:-6px 0 4px 0}
 .score{font-size:2.8rem;font-weight:700;line-height:1}
 .svc{font-size:1.1rem;font-weight:700;margin:2px 0 0 0;line-height:1.4;min-height:2.8em;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
-.money-line{font-size:1.02rem;font-weight:700;color:#063A74;margin:2px 0;min-height:1.5em}
-.what{font-size:.95rem;color:#464C53;line-height:1.55;margin:0 0 4px 0;height:3.1em;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
-.easy{border:1px solid #DDE1E6;border-left:4px solid #256EF4;border-radius:8px;padding:14px 18px;margin-bottom:10px;background:#fff;font-size:1.08rem;line-height:1.7}
-.easy h4{margin:0 0 4px 0;font-size:.92rem;color:#063A74}
-.sum{border:1px solid #DDE1E6;border-top:3px solid #256EF4;border-radius:8px;padding:12px 14px;background:#fff;font-size:.98rem;line-height:1.6;height:100%}
-.insight{font-size:.92rem;color:#1E2124;background:#F4F7FC;border-left:3px solid #256EF4;padding:6px 10px;border-radius:4px;margin:2px 0 6px}
-.sum h4{margin:0 0 4px 0;font-size:.88rem;color:#063A74}
-.sum .money,.money{color:#D6403A;font-size:1.05rem}
-.dlg-t{font-size:1.35rem;font-weight:700;color:#1E2124;line-height:1.35}
-.dlg-sub{font-size:.88rem;color:#6D7882;margin:4px 0 2px}
+.money-line{font-size:1.02rem;font-weight:700;color:var(--bm-heading,#063A74);margin:2px 0;min-height:1.5em}
+.what{font-size:.95rem;color:var(--bm-muted,#464C53);line-height:1.55;margin:0 0 4px 0;height:3.1em;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.easy{border:1px solid var(--bm-border,#DDE1E6);border-left:4px solid var(--bm-accent,#256EF4);border-radius:8px;padding:14px 18px;margin-bottom:10px;background:var(--bm-surface,#fff);font-size:1.08rem;line-height:1.7}
+.easy h4{margin:0 0 4px 0;font-size:.92rem;color:var(--bm-heading,#063A74)}
+.sum{border:1px solid var(--bm-border,#DDE1E6);border-top:3px solid var(--bm-accent,#256EF4);border-radius:8px;padding:12px 14px;background:var(--bm-surface,#fff);font-size:.98rem;line-height:1.6;height:100%}
+.insight{font-size:.92rem;color:var(--bm-text-strong,#1E2124);background:var(--bm-soft,#F4F7FC);border-left:3px solid var(--bm-accent,#256EF4);padding:6px 10px;border-radius:4px;margin:2px 0 6px}
+.sum h4{margin:0 0 4px 0;font-size:.88rem;color:var(--bm-heading,#063A74)}
+.sum .money,.money{color:var(--bm-money,#D6403A);font-size:1.05rem}
+.dlg-t{font-size:1.35rem;font-weight:700;color:var(--bm-text-strong,#1E2124);line-height:1.35}
+.dlg-sub{font-size:.88rem;color:var(--bm-caption,#6D7882);margin:4px 0 2px}
 .band{font-weight:700;padding:1px 8px;border-radius:6px}
-.band-낮음{color:#2F8F5B;background:#E8F5EE}.band-보통{color:#B86A1E;background:#FDF1E4}.band-높음{color:#D6403A;background:#FDECEB}
+.band-낮음{color:var(--bm-easy-text,#2F8F5B);background:var(--bm-easy-bg,#E8F5EE)}.band-보통{color:var(--bm-medium-text,#B86A1E);background:var(--bm-medium-bg,#FDF1E4)}.band-높음{color:var(--bm-hard-text,#D6403A);background:var(--bm-hard-bg,#FDECEB)}
 [data-testid=stDialog] [role=dialog]{padding-top:.4rem}
 section[data-testid=stSidebar]{width:232px !important;min-width:232px !important}
-[data-testid=stSidebar]{background:#F4F7FC;border-right:1px solid #DDE1E6}
+[data-testid=stSidebar]{background:var(--bm-soft,#F4F7FC);border-right:1px solid var(--bm-border,#DDE1E6)}
 [data-testid=stSidebarHeader] img{height:1.9rem !important}
 /* 로고 이름: 이미지가 아니라 본문 제목과 같은 글꼴·굵기·색의 글자로. 홈 밖에서는 로고가 홈 버튼(stLogoLink)으로 감싸져도 붙게 */
 [data-testid=stSidebarHeader] :has(>img[data-testid=stSidebarLogo]){display:flex;align-items:center;gap:8px}
 [data-testid=stSidebarHeader] :has(>img[data-testid=stSidebarLogo])::after{content:"복지문턱";font-family:"Pretendard GOV Variable",sans-serif;
-  font-size:1.35rem;font-weight:700;letter-spacing:-.03em;color:#191F28;white-space:nowrap}
+  font-size:1.35rem;font-weight:700;letter-spacing:-.03em;color:var(--bm-text,#191F28);white-space:nowrap}
 </style>""", unsafe_allow_html=True)
 # 정부 공식 서비스가 아니라는 안내는 정부24처럼 모든 페이지 맨 아래 바닥글에 둔다.
 # 예전처럼 화면 위 띠로 두면 배포 환경의 상단 바에 반쯤 가려진다.
