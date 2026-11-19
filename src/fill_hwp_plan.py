@@ -101,6 +101,7 @@ def _plan_inline_lines(
     font_pt100: int = 1000,
     char_space: int = 0,
     char_ratio: int = 100,
+    line_seg_count: int = 1,
 ) -> list[dict[str, Any]]:
     edits: list[dict[str, Any]] = []
     if not raw or not raw.strip():
@@ -114,6 +115,7 @@ def _plan_inline_lines(
                     "reason": "other_person" if section == "other_person" else "excluded_section",
                 })
         return edits
+    is_multiline_para = (int(line_seg_count or 1) >= 2) or ("\u2028" in raw)
 
     for raw_seg in raw.split("\u2028"):
         stripped = re.sub(r"\s+", " ", raw_seg).strip()
@@ -225,6 +227,9 @@ def _plan_inline_lines(
             if fm.OFFICIAL_INLINE_CTX_RE.search(prev_ctx + " " + direct_ctx + " " + pre):
                 report["skipped_fields"].append({"label": pre.strip(), "location": location, "reason": "excluded_section"})
                 continue
+            if is_multiline_para:
+                report["skipped_fields"].append({"label": pre.strip(), "location": location, "reason": "multiline_body"})
+                continue
             name = (prof.get("applicant.name") or "").strip()
             if not name:
                 continue
@@ -259,6 +264,9 @@ def _plan_inline_lines(
             lbl_clean = re.sub(r"[\s:]+$", "", lbl_anchor)
             dec = fm.match_label(lbl_clean, section=eff_sec, profile=prof)
             if dec.action == "fill" and dec.value:
+                if is_multiline_para:
+                    report["skipped_fields"].append({"label": lbl_anchor.strip(), "location": location, "reason": "multiline_body"})
+                    continue
                 need_w = 1 + fm.display_width_spaces(dec.value) + (1 if sig_suf.strip() else 0)
                 if fm.slot_width_spaces(mid_ws) < need_w:
                     report["skipped_fields"].append({"label": lbl_anchor.strip(), "location": location, "reason": "no_room"})
@@ -349,6 +357,7 @@ def plan_hwp_fills(doc_dump: dict[str, Any], profile: dict[str, str] | None = No
             font_pt100=int(p.get("font_pt100") or 1000),
             char_space=int(p.get("char_space") or 0),
             char_ratio=int(p.get("char_ratio") or 100),
+            line_seg_count=int(p.get("line_seg_count") or 1),
         ):
             para_edits.append({"section": p["section"], "para": p["para"], **ed})
 
@@ -416,6 +425,15 @@ def plan_hwp_fills(doc_dump: dict[str, Any], profile: dict[str, str] | None = No
                     sec = fm.detect_section_context(c0_cell["text"], current="keep")
                     if sec != "keep":
                         tbl_section = sec
+            if c0_cell and max(1, c0_cell.get("row_span", 1)) >= 2:
+                band_r0 = c0_cell["row"]
+                first_row_texts = [
+                    rc.get("text", "")
+                    for rc in row_map.get(band_r0, [])
+                    if rc["col"] > 0 and rc.get("text")
+                ]
+                if fm.is_deceased_band_first_row(first_row_texts):
+                    tbl_section = "other_person"
             is_banner_row = (
                 len(row_cells) <= 2
                 or any(max(1, rc.get("col_span", 1)) >= max(3, int(max_c * 0.65)) for rc in row_cells)
@@ -516,6 +534,7 @@ def plan_hwp_fills(doc_dump: dict[str, Any], profile: dict[str, str] | None = No
                     else:
                         para_aligns = c.get("para_aligns") or []
                         para_pts = c.get("para_pt100s") or []
+                        para_ls_counts = c.get("para_line_seg_counts") or []
                         cell_inner_w = max(1, int(c.get("width", 42000) or 42000) - int(c.get("margin_left", 141) or 0) - int(c.get("margin_right", 141) or 0))
                         for l_idx, ln in enumerate(lines):
                             prev_ln_ctx = " ".join(lines[max(0, l_idx - 3):l_idx]) + " " + prev_row_txt
@@ -527,6 +546,7 @@ def plan_hwp_fills(doc_dump: dict[str, Any], profile: dict[str, str] | None = No
                             ]
                             p_align = str(para_aligns[l_idx]) if l_idx < len(para_aligns) else "Left"
                             p_pt = int(para_pts[l_idx]) if l_idx < len(para_pts) else int(c.get("font_pt100") or 1000)
+                            p_ls_cnt = int(para_ls_counts[l_idx]) if l_idx < len(para_ls_counts) else 1
                             for ed in _plan_inline_lines(
                                 ln, prev_ln_ctx, next_ln_ctx, prof,
                                 f"T{t_idx}({c['row']},{c['col']}) p{l_idx}",
@@ -538,6 +558,7 @@ def plan_hwp_fills(doc_dump: dict[str, Any], profile: dict[str, str] | None = No
                                 font_pt100=p_pt,
                                 char_space=int(c.get("char_space") or 0),
                                 char_ratio=int(c.get("char_ratio") or 100),
+                                line_seg_count=p_ls_cnt,
                             ):
                                 if ed.get("field_key") == "apply_date":
                                     handled_date_cells.add((t_idx, c["cell_idx"]))

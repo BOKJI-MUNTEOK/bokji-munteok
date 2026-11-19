@@ -14,6 +14,7 @@ import kr.dogfoot.hwplib.object.bodytext.paragraph.text.HWPCharType;
 import kr.dogfoot.hwplib.object.bodytext.paragraph.text.ParaText;
 import kr.dogfoot.hwplib.object.docinfo.CharShape;
 import kr.dogfoot.hwplib.object.docinfo.ParaShape;
+import kr.dogfoot.hwplib.object.etc.Color4Byte;
 import kr.dogfoot.hwplib.reader.HWPReader;
 import kr.dogfoot.hwplib.writer.HWPWriter;
 
@@ -174,6 +175,32 @@ public class HwpLibTool {
         return 160;
     }
 
+    private static int paraLineSegCount(Paragraph p) {
+        if (p != null && p.getLineSeg() != null && !p.getLineSeg().getLineSegItemList().isEmpty()) {
+            return p.getLineSeg().getLineSegItemList().size();
+        }
+        return 1;
+    }
+
+    private static boolean isNearWhite(Color4Byte c) {
+        return c != null && c.getR() >= 220 && c.getG() >= 220 && c.getB() >= 220;
+    }
+
+    private static boolean hasDarkCellBackground(HWPFile hwp, Cell cell) {
+        if (cell == null || cell.getListHeader() == null) return false;
+        int bfId = cell.getListHeader().getBorderFillId() - 1;
+        var bfList = hwp.getDocInfo().getBorderFillList();
+        if (bfId < 0 || bfId >= bfList.size()) return false;
+        var fi = bfList.get(bfId).getFillInfo();
+        if (fi == null || fi.getType() == null || !fi.getType().hasPatternFill() || fi.getPatternFill() == null) {
+            return false;
+        }
+        var bg = fi.getPatternFill().getBackColor();
+        if (bg == null || bg.getValue() == 0xffffffffL) return false;
+        int lum = (bg.getR() * 299 + bg.getG() * 587 + bg.getB() * 114) / 1000;
+        return lum < 128;
+    }
+
     private static String inspectToJson(HWPFile hwp) {
         var csList = hwp.getDocInfo().getCharShapeList();
         int defaultShapeId = -1;
@@ -219,6 +246,7 @@ public class HwpLibTool {
                   .append(",\"char_space\":").append(charSpaceHangul(hwp, pShape))
                   .append(",\"char_ratio\":").append(charRatioHangul(hwp, pShape))
                   .append(",\"para_align\":").append(jsonEscape(paraAlignName(hwp, p)))
+                  .append(",\"line_seg_count\":").append(paraLineSegCount(p))
                   .append(",\"text\":").append(jsonEscape(safeParaString(p))).append('}');
 
                 if (p.getControlList() != null) {
@@ -289,6 +317,11 @@ public class HwpLibTool {
                         if (k > 0) sb.append(',');
                         sb.append(fontPt100(hwp, paraCharShapeId(pl.getParagraph(k))));
                     }
+                    sb.append("],\"para_line_seg_counts\":[");
+                    for (int k = 0; k < pl.getParagraphCount(); k++) {
+                        if (k > 0) sb.append(',');
+                        sb.append(paraLineSegCount(pl.getParagraph(k)));
+                    }
                     sb.append("],\"text\":").append(jsonEscape(cellJoinedText(cell))).append('}');
                 }
             }
@@ -328,7 +361,7 @@ public class HwpLibTool {
                 }
                 if (cpIdx < 0 || cpIdx >= plist.getParagraphCount()) continue;
                 Paragraph targetP = plist.getParagraph(cpIdx);
-                int finalShapeId = resolveDerivedCharShapeId(hwp, targetP, overrideShapeId, ed, derivedCharShapes);
+                int finalShapeId = resolveDerivedCharShapeId(hwp, targetP, cell, overrideShapeId, ed, derivedCharShapes);
                 if (applyParaEdit(targetP, mode, anchor, value)) {
                     applyCharShapeOverride(hwp, targetP, finalShapeId);
                     applied++;
@@ -353,7 +386,7 @@ public class HwpLibTool {
                 Section sec = secs.get(secIdx);
                 if (pIdx < 0 || pIdx >= sec.getParagraphCount()) continue;
                 Paragraph targetP = sec.getParagraph(pIdx);
-                int finalShapeId = resolveDerivedCharShapeId(hwp, targetP, overrideShapeId, ed, derivedCharShapes);
+                int finalShapeId = resolveDerivedCharShapeId(hwp, targetP, null, overrideShapeId, ed, derivedCharShapes);
                 if (applyParaEdit(targetP, mode, anchor, value)) {
                     applyCharShapeOverride(hwp, targetP, finalShapeId);
                     applied++;
@@ -366,16 +399,11 @@ public class HwpLibTool {
     private static int resolveDerivedCharShapeId(
             HWPFile hwp,
             Paragraph p,
+            Cell cell,
             int baseOverrideSid,
             Map<String, Object> ed,
             Map<String, Integer> derivedCache
     ) throws Exception {
-        int fitPt = ed.get("fit_font_pt100") instanceof Number n ? n.intValue() : -1;
-        boolean hasSp = ed.get("fit_char_space") instanceof Number;
-        int fitSp = hasSp ? ((Number) ed.get("fit_char_space")).intValue() : 0;
-        if (fitPt <= 0 && !hasSp) {
-            return baseOverrideSid;
-        }
         var csList = hwp.getDocInfo().getCharShapeList();
         if (csList.isEmpty()) {
             return baseOverrideSid;
@@ -385,14 +413,24 @@ public class HwpLibTool {
             baseSid = 0;
         }
         CharShape orig = csList.get(baseSid);
+        boolean fixWhite = cell != null
+                && "set".equals(asStr(ed.get("mode")))
+                && isNearWhite(orig.getCharColor())
+                && !hasDarkCellBackground(hwp, cell);
+        int fitPt = ed.get("fit_font_pt100") instanceof Number n ? n.intValue() : -1;
+        boolean hasSp = ed.get("fit_char_space") instanceof Number;
+        int fitSp = hasSp ? ((Number) ed.get("fit_char_space")).intValue() : 0;
+        if (!fixWhite && fitPt <= 0 && !hasSp) {
+            return baseOverrideSid;
+        }
         int origPt = orig.getBaseSize();
         int origSp = orig.getCharSpaces() != null ? orig.getCharSpaces().getHangul() : 0;
         int targetPt = fitPt > 0 ? Math.max(800, fitPt) : origPt;
         int targetSp = hasSp ? Math.max(-10, fitSp) : origSp;
-        if (targetPt == origPt && targetSp == origSp) {
+        if (!fixWhite && targetPt == origPt && targetSp == origSp) {
             return baseOverrideSid;
         }
-        String cacheKey = baseSid + ":" + targetPt + ":" + targetSp;
+        String cacheKey = baseSid + ":" + targetPt + ":" + targetSp + (fixWhite ? ":blk" : "");
         Integer cached = derivedCache.get(cacheKey);
         if (cached != null) {
             return cached;
@@ -401,6 +439,9 @@ public class HwpLibTool {
         copy.setBaseSize(targetPt);
         if (copy.getCharSpaces() != null) {
             copy.getCharSpaces().setForAll((byte) targetSp);
+        }
+        if (fixWhite && copy.getCharColor() != null) {
+            copy.getCharColor().setValue(0x00000000L);
         }
         csList.add(copy);
         int newId = csList.size() - 1;

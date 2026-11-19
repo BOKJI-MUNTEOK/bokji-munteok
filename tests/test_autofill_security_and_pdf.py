@@ -981,7 +981,7 @@ class TestAutofillSecurityAndEngines(unittest.TestCase):
                         {"cell_idx": 0, "row": 0, "col": 0, "row_span": 1, "col_span": 1, "text": "연 락 처", "width": 8000, "height": 2000},
                         {"cell_idx": 1, "row": 0, "col": 1, "row_span": 1, "col_span": 1, "text": "자택 :\n휴대폰 :", "width": 16000, "height": 3600, "para_pt100s": [1000, 1000]},
                         {"cell_idx": 2, "row": 1, "col": 0, "row_span": 1, "col_span": 2, "text": "위와 같이 신청합니다.\n년 월 일\n년    윌    일", "width": 45000, "height": 6000, "para_aligns": ["Left", "Center", "Center"], "para_pt100s": [1000, 1000, 1000]},
-                        {"cell_idx": 3, "row": 2, "col": 0, "row_span": 1, "col_span": 2, "text": "신청인  주 소 :                                 \u2028성 명 :                  \U000f012b\u2028(지급대상자와의 관계 :        )", "width": 45000, "height": 4000, "para_aligns": ["Left"], "para_pt100s": [1000]},
+                        {"cell_idx": 3, "row": 2, "col": 0, "row_span": 1, "col_span": 2, "text": "신청인  주 소 :                                 \n성 명 :                  \U000f012b\n(지급대상자와의 관계 :        )", "width": 45000, "height": 4000, "para_aligns": ["Left", "Left", "Left"], "para_pt100s": [1000, 1000, 1000], "para_line_seg_counts": [1, 1, 1]},
                     ],
                 },
             ],
@@ -1114,6 +1114,155 @@ class TestAutofillSecurityAndEngines(unittest.TestCase):
         plan = fill_hwp_plan.plan_hwp_fills(doc_dump)
         self.assertEqual([(e["para"], e["field_key"]) for e in plan["para_edits"]], [(1, "applicant.name")])
         self.assertTrue(any(s["reason"] == "no_room" and "주 소" in s["label"] for s in plan["report"]["skipped_fields"]))
+
+    def test_fix_09_deceased_samanghan_excluded(self) -> None:
+        self.assertEqual(fm.detect_section_context("사망한\n참  전\n유공자"), "other_person")
+        self.assertEqual(fm.detect_section_context("사망위로금 지급신청서", current="applicant"), "applicant")
+        self.assertEqual(fm.detect_section_context("사망진단서", current="applicant"), "applicant")
+        doc_dump = {
+            "default_char_shape_id": 0,
+            "default_font_pt100": 1000,
+            "paragraphs": [{"section": 0, "para": 0, "text": ""}],
+            "tables": [
+                {
+                    "section": 0, "para": 0, "control": 0, "row_count": 4, "col_count": 5,
+                    "cells": [
+                        {"cell_idx": 0, "row": 0, "col": 0, "row_span": 1, "col_span": 5, "text": "사망한 참전유공자의 배우자 복지수당 지급신청서\n(제11조제1항 관련)"},
+                        {"cell_idx": 1, "row": 1, "col": 0, "row_span": 1, "col_span": 1, "text": "사망한\n참  전\n유공자"},
+                        {"cell_idx": 2, "row": 1, "col": 1, "row_span": 1, "col_span": 1, "text": "성    명"},
+                        {"cell_idx": 3, "row": 1, "col": 2, "row_span": 1, "col_span": 1, "text": ""},
+                        {"cell_idx": 4, "row": 1, "col": 3, "row_span": 1, "col_span": 1, "text": "생년월일"},
+                        {"cell_idx": 5, "row": 1, "col": 4, "row_span": 1, "col_span": 1, "text": ""},
+                        {"cell_idx": 6, "row": 2, "col": 0, "row_span": 2, "col_span": 1, "text": "신청인"},
+                        {"cell_idx": 7, "row": 2, "col": 1, "row_span": 1, "col_span": 1, "text": "성    명"},
+                        {"cell_idx": 8, "row": 2, "col": 2, "row_span": 1, "col_span": 1, "text": ""},
+                        {"cell_idx": 9, "row": 2, "col": 3, "row_span": 1, "col_span": 1, "text": "생년월일"},
+                        {"cell_idx": 10, "row": 2, "col": 4, "row_span": 1, "col_span": 1, "text": ""},
+                        {"cell_idx": 11, "row": 3, "col": 1, "row_span": 1, "col_span": 1, "text": "주    소"},
+                        {"cell_idx": 12, "row": 3, "col": 2, "row_span": 1, "col_span": 3, "text": ""},
+                    ],
+                },
+            ],
+        }
+        plan = fill_hwp_plan.plan_hwp_fills(doc_dump)
+        self.assertEqual(
+            {(e["row"], e["col"]): e["value"] for e in plan["cell_edits"]},
+            {(2, 2): "홍길동", (2, 4): "1950-01-01", (3, 2): "서울특별시 구로구 가마산로 000"},
+        )
+        self.assertTrue(
+            any(s["location"] == "T0(1,1)" and s["reason"] == "other_person" for s in plan["report"]["skipped_fields"])
+        )
+
+    def test_fix_09_band_first_row_deceased_and_claimant_rep(self) -> None:
+        self.assertEqual(fm.detect_section_context("청구인\u2028\u2028(대표자)"), "applicant")
+        self.assertEqual(fm.detect_section_context("청구인(대표자 선정)"), "applicant")
+        doc_dump = {
+            "default_char_shape_id": 0,
+            "default_font_pt100": 900,
+            "paragraphs": [{"section": 0, "para": 0, "text": ""}],
+            "tables": [
+                {
+                    "section": 0, "para": 0, "control": 0, "row_count": 4, "col_count": 6,
+                    "cells": [
+                        {"cell_idx": 0, "row": 0, "col": 0, "row_span": 2, "col_span": 1, "text": "청구인\u2028\u2028(대표자)"},
+                        {"cell_idx": 1, "row": 0, "col": 1, "row_span": 1, "col_span": 1, "text": "성명"},
+                        {"cell_idx": 2, "row": 0, "col": 2, "row_span": 1, "col_span": 2, "text": ""},
+                        {"cell_idx": 3, "row": 0, "col": 4, "row_span": 1, "col_span": 1, "text": "주민등록번호"},
+                        {"cell_idx": 4, "row": 0, "col": 5, "row_span": 1, "col_span": 1, "text": ""},
+                        {"cell_idx": 5, "row": 1, "col": 1, "row_span": 1, "col_span": 1, "text": "주소"},
+                        {"cell_idx": 6, "row": 1, "col": 2, "row_span": 1, "col_span": 4, "text": ""},
+                        {"cell_idx": 7, "row": 2, "col": 0, "row_span": 2, "col_span": 1, "text": "미지급\u2028\u2028보훈명예수당\u2028\u2028내역"},
+                        {"cell_idx": 8, "row": 2, "col": 1, "row_span": 1, "col_span": 3, "text": "사망자"},
+                        {"cell_idx": 9, "row": 2, "col": 4, "row_span": 1, "col_span": 2, "text": "주민등록번호"},
+                        {"cell_idx": 10, "row": 3, "col": 1, "row_span": 1, "col_span": 3, "text": "전화번호(자택)"},
+                        {"cell_idx": 11, "row": 3, "col": 4, "row_span": 1, "col_span": 2, "text": "휴대전화"},
+                    ],
+                },
+            ],
+        }
+        plan = fill_hwp_plan.plan_hwp_fills(doc_dump)
+        self.assertEqual(
+            {(e["row"], e["col"]): e["value"] for e in plan["cell_edits"]},
+            {(0, 2): "홍길동", (0, 5): "500101-1234567", (1, 2): "서울특별시 구로구 가마산로 000"},
+        )
+        self.assertTrue(
+            any(s["location"] == "T0(3,4)" and s["reason"] == "other_person" for s in plan["report"]["skipped_fields"])
+        )
+        # HWPX 흰색 글자색(#FFFFFF) 빈 셀은 검정(#000000) 파생 charPr을 적용한다
+        header = (
+            b"<hh:head xmlns:hh='http://www.hancom.co.kr/hwpml/2011/head'>"
+            b"<hh:charProperties itemCnt='2'>"
+            b"<hh:charPr id='0' height='1000' textColor='#000000'><hh:spacing hangul='0' latin='0' hanja='0' japanese='0' other='0' symbol='0' user='0'/></hh:charPr>"
+            b"<hh:charPr id='1' height='1000' textColor='#FFFFFF'><hh:spacing hangul='0' latin='0' hanja='0' japanese='0' other='0' symbol='0' user='0'/></hh:charPr>"
+            b"</hh:charProperties>"
+            b"<hh:paraProperties itemCnt='1'>"
+            b"<hh:paraPr id='0'><hh:align horizontal='LEFT' vertical='BASELINE'/><hh:lineSpacing type='PERCENT' value='160' unit='HWPUNIT'/></hh:paraPr>"
+            b"</hh:paraProperties>"
+            b"</hh:head>"
+        )
+        sec = (
+            b"<hs:sec xmlns:hs='http://www.hancom.co.kr/hwpml/2011/section' "
+            b"xmlns:hp='http://www.hancom.co.kr/hwpml/2011/paragraph'>"
+            b"<hp:tbl><hp:tr>"
+            b"<hp:tc><hp:cellAddr colAddr='0' rowAddr='0'/><hp:cellSpan colSpan='1' rowSpan='1'/><hp:cellSz width='8000' height='2000'/><hp:cellMargin left='141' right='141' top='141' bottom='141'/><hp:subList><hp:p paraPrIDRef='0'><hp:run charPrIDRef='0'><hp:t>\xec\x84\xb1\xeb\xaa\x85</hp:t></hp:run></hp:p></hp:subList></hp:tc>"
+            b"<hp:tc><hp:cellAddr colAddr='1' rowAddr='0'/><hp:cellSpan colSpan='1' rowSpan='1'/><hp:cellSz width='12000' height='2000'/><hp:cellMargin left='141' right='141' top='141' bottom='141'/><hp:subList><hp:p paraPrIDRef='0'><hp:run charPrIDRef='1'><hp:t></hp:t></hp:run></hp:p></hp:subList></hp:tc>"
+            b"</hp:tr></hp:tbl></hs:sec>"
+        )
+        out_bytes, rep = fill_hwpx.fill_hwpx_bytes(_make_minimal_hwpx(sec, {"Contents/header.xml": header}))
+        self.assertEqual(rep["filled_count"], 1)
+        with zipfile.ZipFile(io.BytesIO(out_bytes)) as zf:
+            hdr_out = zf.read("Contents/header.xml").decode("utf-8")
+            sec_out = zf.read("Contents/section0.xml").decode("utf-8")
+            self.assertIn('textColor="#000000"', hdr_out)
+            self.assertIn('itemCnt="3"', hdr_out)
+            self.assertIn('charPrIDRef="2"', sec_out)
+
+    def test_fix_09_multiline_body_skipped_except_date(self) -> None:
+        doc_dump = {
+            "default_char_shape_id": 0,
+            "default_font_pt100": 1000,
+            "paragraphs": [
+                {"section": 0, "para": 0, "para_align": "Left", "font_pt100": 1000, "line_seg_count": 1, "text": "위와 같이 신청합니다."},
+                {"section": 0, "para": 1, "para_align": "Left", "font_pt100": 1000, "line_seg_count": 2, "text": "                     성    명 :                  (서명 또는 날인)\n보조 본문 둘째 줄"},
+                {"section": 0, "para": 2, "para_align": "Left", "font_pt100": 1000, "line_seg_count": 1, "text": "                     성    명 :                  (서명 또는 날인)"},
+            ],
+            "tables": [
+                {
+                    "section": 0, "para": 0, "control": 0, "row_count": 1, "col_count": 1,
+                    "cells": [
+                        {
+                            "cell_idx": 0, "row": 0, "col": 0, "row_span": 1, "col_span": 1,
+                            "text": "20  년  월  일\n신청인  주 소 :                                 \u2028성 명 :                  \U000f012b\u2028(지급대상자와의 관계 :        )",
+                            "width": 45000, "height": 5000,
+                            "para_aligns": ["Center", "Left"],
+                            "para_pt100s": [1000, 1000],
+                            "para_line_seg_counts": [1, 3],
+                        },
+                    ],
+                },
+            ],
+        }
+        plan = fill_hwp_plan.plan_hwp_fills(doc_dump)
+        self.assertEqual([(e["para"], e["field_key"]) for e in plan["para_edits"]], [(2, "applicant.name")])
+        self.assertEqual([(e["cell_para_idx"], e["field_key"]) for e in plan["cell_edits"]], [(0, "apply_date")])
+        self.assertGreaterEqual(
+            sum(1 for s in plan["report"]["skipped_fields"] if s["reason"] == "multiline_body"),
+            2,
+        )
+        # HWPX lineseg 2개 이상 문단: 날짜 줄만 채우고 성명 줄은 skipped: multiline_body
+        sec_ml = (
+            b"<hs:sec xmlns:hs='http://www.hancom.co.kr/hwpml/2011/section' "
+            b"xmlns:hp='http://www.hancom.co.kr/hwpml/2011/paragraph'>"
+            b"<hp:p><hp:run><hp:t>\xec\x8b\xa0\xec\xb2\xad\xed\x95\xa9\xeb\x8b\x88\xeb\x8b\xa4.</hp:t></hp:run></hp:p>"
+            b"<hp:p><hp:run><hp:t>20    \xeb\x85\x84     \xec\x9b\x94     \xec\x9d\xbc</hp:t></hp:run>"
+            b"<hp:linesegarray><hp:lineseg/><hp:lineseg/></hp:linesegarray></hp:p>"
+            b"<hp:p><hp:run><hp:t>" + "성 명 :                  ㉿".encode("utf-8") + b"</hp:t></hp:run>"
+            b"<hp:linesegarray><hp:lineseg/><hp:lineseg/></hp:linesegarray></hp:p>"
+            b"</hs:sec>"
+        )
+        _, rep_ml = fill_hwpx.fill_hwpx_bytes(_make_minimal_hwpx(sec_ml))
+        self.assertEqual([f["field_key"] for f in rep_ml["filled_fields"]], ["apply_date"])
+        self.assertTrue(any(s["reason"] == "multiline_body" for s in rep_ml["skipped_fields"]))
 
 
 if __name__ == "__main__":

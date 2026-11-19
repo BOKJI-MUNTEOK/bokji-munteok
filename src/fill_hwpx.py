@@ -76,7 +76,16 @@ def _parse_header_styles(
             rt_val = int(rt_el.get("hangul", "100")) if rt_el is not None else 100
         except ValueError:
             rt_val = 100
-        char_info[cid] = {"height": h_val, "spacing": sp_val, "ratio": rt_val}
+        tc_hex = (cp.get("textColor") or "").strip().lstrip("#")
+        is_white_col = 0
+        if len(tc_hex) == 6:
+            try:
+                r_c, g_c, b_c = int(tc_hex[0:2], 16), int(tc_hex[2:4], 16), int(tc_hex[4:6], 16)
+                if r_c >= 220 and g_c >= 220 and b_c >= 220:
+                    is_white_col = 1
+            except ValueError:
+                pass
+        char_info[cid] = {"height": h_val, "spacing": sp_val, "ratio": rt_val, "is_white": is_white_col}
         if default_cid is None and 800 <= h_val <= 1100:
             default_cid = cid
         if fallback_cid is None and h_val >= 700:
@@ -108,10 +117,11 @@ def _ensure_char_pr_variant(
     new_h: int,
     new_sp: int,
     char_info: dict[str, dict[str, int]],
-    cache: dict[tuple[str, int, int], str],
+    cache: dict[tuple[str, int, int, bool], str],
     doc_default_cid: str | None,
+    force_black: bool = False,
 ) -> tuple[str | None, bool]:
-    """orig_cid 기반 파생 charPr(높이·자간 변경)을 header.xml에 복제·등록한다."""
+    """orig_cid 기반 파생 charPr(높이·자간·검정 글자색 변경)을 header.xml에 복제·등록한다."""
     if hdr_root is None:
         return None, False
     base_cid = orig_cid if (orig_cid and orig_cid in char_info) else doc_default_cid
@@ -120,10 +130,10 @@ def _ensure_char_pr_variant(
     base_st = char_info[base_cid]
     target_h = max(800, int(new_h))
     target_sp = max(-10, int(new_sp))
-    if target_h == base_st["height"] and target_sp == base_st["spacing"]:
+    if not force_black and target_h == base_st["height"] and target_sp == base_st["spacing"]:
         return (orig_cid if orig_cid == base_cid else base_cid), False
 
-    ck = (base_cid, target_h, target_sp)
+    ck = (base_cid, target_h, target_sp, force_black)
     if ck in cache:
         return cache[ck], False
 
@@ -139,6 +149,8 @@ def _ensure_char_pr_variant(
     cloned = copy.deepcopy(orig_el)
     cloned.set("id", new_cid)
     cloned.set("height", str(target_h))
+    if force_black:
+        cloned.set("textColor", "#000000")
     for ch in cloned:
         if _local(ch.tag) == "spacing":
             for attr in ("hangul", "latin", "hanja", "japanese", "other", "symbol", "user"):
@@ -147,7 +159,12 @@ def _ensure_char_pr_variant(
     cp_container.append(cloned)
     cnt_now = sum(1 for el in cp_container if _local(el.tag) == "charPr")
     cp_container.set("itemCnt", str(cnt_now))
-    char_info[new_cid] = {"height": target_h, "spacing": target_sp, "ratio": base_st["ratio"]}
+    char_info[new_cid] = {
+        "height": target_h,
+        "spacing": target_sp,
+        "ratio": base_st["ratio"],
+        "is_white": 0 if force_black else int(base_st.get("is_white", 0)),
+    }
     cache[ck] = new_cid
     return new_cid, True
 
@@ -540,6 +557,9 @@ def _fill_inline_paragraphs(
         run0 = next((ch for ch in p_el if _local(ch.tag) == "run"), None)
         cid = run0.get("charPrIDRef") if run0 is not None else None
         cst = c_info.get(cid or "") or {"height": 1000, "spacing": 0, "ratio": 100}
+        lineseg_cnt = len(p_el.xpath("./*[local-name()='linesegarray']/*[local-name()='lineseg']"))
+        has_soft_break = bool(p_el.xpath(".//*[local-name()='lineBreak']")) or ("\n" in raw) or ("\u2028" in raw)
+        is_multiline_para = (lineseg_cnt >= 2) or has_soft_break
 
         # 1) 신청 날짜 인라인: '년   월(윌)   일' 또는 '20   년   월(윌)   일'
         if re.fullmatch(r"(?:20\s*)?년\s*[월윌]\s*일", stripped):
@@ -652,6 +672,11 @@ def _fill_inline_paragraphs(
                     "label": prefix.strip(), "location": f"{location_prefix}, p{pi}", "reason": "excluded_section",
                 })
                 continue
+            if is_multiline_para:
+                report["skipped_fields"].append({
+                    "label": prefix.strip(), "location": f"{location_prefix}, p{pi}", "reason": "multiline_body",
+                })
+                continue
             app_name = (profile.get("applicant.name") or "").strip()
             if not app_name:
                 continue
@@ -694,6 +719,11 @@ def _fill_inline_paragraphs(
                 eff_sec = "applicant"
             dec = fm.match_label(re.sub(r"[\s:]+$", "", lbl_anchor), section=eff_sec, profile=profile)
             if dec.action == "fill" and dec.value:
+                if is_multiline_para:
+                    report["skipped_fields"].append({
+                        "label": lbl_anchor.strip(), "location": f"{location_prefix}, p{pi}", "reason": "multiline_body",
+                    })
+                    continue
                 need_w = 1 + fm.display_width_spaces(dec.value) + (1 if sig_suf.strip() else 0)
                 if fm.slot_width_spaces(mid_ws) < need_w:
                     report["skipped_fields"].append({
@@ -861,7 +891,7 @@ def fill_hwpx_bytes(
 
         hdr_root, char_pr_info, doc_default_cid, para_pr_info = _parse_header_styles(zin)
         char_pr_heights = {cid: st["height"] for cid, st in char_pr_info.items()}
-        char_variant_cache: dict[tuple[str, int, int], str] = {}
+        char_variant_cache: dict[tuple[str, int, int, bool], str] = {}
         header_modified = False
         updated_sections: dict[str, bytes] = {}
         filled_tcs: set[int] = set()
@@ -939,6 +969,14 @@ def fill_hwpx_bytes(
                             wsec = fm.detect_section_context(row_joined, current="keep")
                             if wsec != "keep":
                                 tbl_section = wsec
+                    c0_band = grid.get((r, 0))
+                    if c0_band and c0_band.row_span >= 2:
+                        first_row_texts = [
+                            rc.text for rc in row_map.get(c0_band.row, [])
+                            if rc.col > 0 and rc.text
+                        ]
+                        if fm.is_deceased_band_first_row(first_row_texts):
+                            tbl_section = "other_person"
 
                     row_head_c0 = grid.get((r, 0))
                     row_head_norm = fm.normalize_label(row_head_c0.text) if row_head_c0 and row_head_c0.text else ""
@@ -1190,10 +1228,12 @@ def fill_hwpx_bytes(
                                 "reason": "no_room",
                             })
                             continue
-                        if fit_changed:
+                        need_black = bool(base_st.get("is_white"))
+                        if fit_changed or need_black:
                             new_cid, created = _ensure_char_pr_variant(
                                 hdr_root, base_cid_for_fit, fit_h, fit_sp,
                                 char_pr_info, char_variant_cache, doc_default_cid,
+                                force_black=need_black,
                             )
                             if new_cid is not None:
                                 override_cid = new_cid

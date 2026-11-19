@@ -24,7 +24,11 @@ APPROVAL_HEADER_RE = re.compile(r"(?:^|\s)결\s*재(?:\s|$)|결재란")
 
 # 1순위 사망/고인 구역 (신청인 병기라도 반드시 제외)
 DECEASED_SECTION_RE = re.compile(
-    r"사망인|사망자|(?<![가-힣])망인(?![가-힣])|(?<![가-힣])고인(?![가-힣])"
+    r"사망(?:한|자|인)|(?<![가-힣])사망(?![가-힣])|(?<![가-힣])망인(?![가-힣])|(?<![가-힣])고인(?![가-힣])"
+)
+# 세로 병합 구역 첫 행 라벨에서 사망자 관련 구역 판별용 (사망일 포함)
+DECEASED_FIRST_ROW_RE = re.compile(
+    r"사망(?:한|자|인|일)|(?<![가-힣])사망(?![가-힣])|(?<![가-힣])망인(?![가-힣])|(?<![가-힣])고인(?![가-힣])"
 )
 
 # 다른 사람 유형 구역 (낱말 전체 기준 매칭, skipped reason="other_person")
@@ -172,12 +176,12 @@ def detect_section_context(text: str, current: str = "applicant") -> str:
     # '~와의 관계' 같은 관계 라벨 자체는 구역 헤더가 아님
     rel_check = re.sub(r"\s+", "", compact_for_sec)
     if re.fullmatch(
-        r"(?:\(?[①-⑩*]?\s*)?(?:보훈대상자|지원대상자|지급대상자|수급권자|출산자|신청인|세대주|임산부|본인|장애인)와의?관계[:：)]*",
+        r"(?:\(?[①-⑩*]?\s*)?(?:보훈대상자|지원대상자|지급대상자|수급권자|출산자|신청인|세대주|임산부|본인|장애인|사망자|사망인|고인|망인)와의?관계[:：)]*",
         rel_check,
     ):
         return current
 
-    # 우선순위: ① 사망인/사망자/망인/고인 → ②a 신청인(대리신청인) → ②b 대리인 → ②c 신청인/보호자 → ③ 타인 유형
+    # 우선순위: ① 사망/사망인/사망자/사망한/망인/고인 → ②a 신청인(대리신청인) → ②b 대리인 → ②c 신청인/보호자 → ③ 타인 유형
     if DECEASED_SECTION_RE.search(compact_no_law) or DECEASED_SECTION_RE.search(compact_ns):
         return "other_person"
     if APPLICANT_MIXED_RE.search(compact_for_sec) or APPLICANT_MIXED_RE.search(compact_ns):
@@ -189,6 +193,22 @@ def detect_section_context(text: str, current: str = "applicant") -> str:
     if OTHER_PERSON_SECTION_RE.search(compact_no_law) or OTHER_PERSON_SECTION_RE.search(compact_ns):
         return "other_person"
     return current
+
+
+def is_deceased_band_first_row(row_texts: list[str]) -> bool:
+    """세로 병합 구역의 첫 행(col>=1) 라벨에 사망자·사망일·망인·고인이 있으면 True('~와의 관계'·체크박스 행 제외)."""
+    for txt in row_texts:
+        if not txt:
+            continue
+        t = re.sub(r"\s+", " ", txt).strip()
+        if not t or len(t) > 40 or t.startswith("※") or t.count("□") >= 2:
+            continue
+        t_ns = re.sub(r"\s+", "", t)
+        if re.search(r"와의?관계", t_ns):
+            continue
+        if DECEASED_FIRST_ROW_RE.search(t) or DECEASED_FIRST_ROW_RE.search(t_ns):
+            return True
+    return False
 
 
 def is_ledger_or_approval_table(top_cell_texts: list[str], prev_title: str = "") -> bool:
