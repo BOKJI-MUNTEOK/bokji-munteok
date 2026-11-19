@@ -59,4 +59,11 @@ def score(ext: dict, read: dict, w: dict | None = None) -> dict:
     reasons.append(f"서류 {len(docs)}개" if docs else "서류 정보 없음")
     if read["points"] >= 2:
         reasons.append("안내문 어려움")
-    return {"score": total, "raw": round(raw, 1), "parts": parts, "reason": ", ".join(reasons) + f"라서 {total}점"}
+    text = ", ".join(reasons)
+    return {"score": total, "raw": round(raw, 1), "parts": parts, "reason": f"{text}{_rase(text)} {total}점"}
+
+
+def _rase(word: str) -> str:
+    """받침이 있으면 '이라서'(어려움이라서), 없으면 '라서'(서류 3개라서)."""
+    last = word[-1:]
+    return "이라서" if "가" <= last <= "힣" and (ord(last) - 0xAC00) % 28 else "라서"
