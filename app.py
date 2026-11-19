@@ -269,40 +269,62 @@ def docs_list(r):
 
 
 def packet_box(r):
-    """상담에서 받은 정보로 채운 작성 도우미 PDF + 원본 양식을 ZIP으로."""
+    """상담·입력 정보로 채운 기관 양식 + 작성 도우미 PDF + 참고자료를 ZIP으로."""
     s, ss = r["svc"], st.session_state
     me = ss.get("me")
+    sid = s["servId"]
     with st.container(border=True):
         st.markdown("**📦 신청 준비 꾸러미 한 번에 받기**")
-        st.caption("신청 준비표, 미리 채운 신청서·위임장 작성 도우미(PDF), 복지로 원본 양식을 ZIP 하나로 드려요. "
-                   "주민등록번호·서명·계좌처럼 본인만 쓸 수 있는 칸은 비워 둬요. 입력한 내용은 저장하지 않아요.")
+        st.caption(
+            "입력한 정보로 기관 양식(.hwp·.hwpx·.pdf)을 미리 채워(`작성됨_...`) 작성 도우미 PDF와 함께 ZIP 하나로 드려요. "
+            "서명·날인 칸은 비워 두며, 지원하지 않는 양식은 원본 그대로 담고 PDF에 안내해 드려요. 입력한 내용은 저장·전송하지 않아요."
+        )
         if me:
             st.markdown("채울 정보: " + " · ".join(([me["name"] + "님"] if me["name"] else []) + intake.summary(me)))
         else:
-            st.info("'내 복지 찾기'에서 질문에 답하면 주소·나이 등이 자동으로 채워져요. 지금 받으면 빈칸으로 나와요.")
+            st.info("'내 복지 찾기'에서 질문에 답하면 주소·나이 등이 자동으로 채워져요. 지금 받으면 비운 칸으로 나와요.")
         c = st.columns(2)
-        name = c[0].text_input("이름 (선택)", key=f"pk_name_{s['servId']}", placeholder="예: 홍길동",
-                               help="신청서·위임장 작성 도우미의 성명 칸에만 넣고 저장하지 않아요.")
+        name = c[0].text_input("이름 (선택)", key=f"pk_name_{sid}", placeholder="예: 홍길동",
+                               help="신청서·위임장 성명 칸에만 넣고 저장하지 않아요.")
         if name.strip():
             me = {**(me or intake.new_profile()), "name": name.strip()[:10]}
-        extra = {"phone": c[1].text_input("연락처 (선택)", key=f"pk_phone_{s['servId']}"),
-                 "address": st.text_input("상세 주소 (선택)", key=f"pk_addr_{s['servId']}", placeholder="예: OO로 12, 101동 202호")}
-        c = st.columns(2)
-        extra |= {"proxy": c[0].text_input("대신 내는 사람 성함 (선택)", key=f"pk_proxy_{s['servId']}"),
-                  "relation": c[1].text_input("신청인과 관계 (선택)", key=f"pk_rel_{s['servId']}", placeholder="예: 아들")}
-        if st.button("꾸러미 만들기", type="primary", key=f"pk_make_{s['servId']}", width="stretch"):
-            with st.spinner("작성 도우미를 채우고 복지로에서 양식을 내려받고 있어요"):
+        phone = c[1].text_input("연락처 (선택)", key=f"pk_phone_{sid}", placeholder="예: 010-0000-0000")
+        c2 = st.columns(2)
+        rrn = c2[0].text_input("주민등록번호 (선택)", key=f"pk_rrn_{sid}", type="password",
+                               placeholder="예: 500101-1234567",
+                               help="기관 양식의 주민등록번호·생년월일 칸에만 채우고 화면·저장소·로그에 남기지 않아요.")
+        monthly_income = c2[1].text_input("월 소득 (선택)", key=f"pk_income_{sid}", placeholder="예: 1,000,000")
+        address = st.text_input("상세 주소 (선택)", key=f"pk_addr_{sid}", placeholder="예: OO로 12, 101동 202호")
+        c3 = st.columns(3)
+        bank = c3[0].text_input("은행명 (선택)", key=f"pk_bank_{sid}", placeholder="예: 농협")
+        account_number = c3[1].text_input("계좌번호 (선택)", key=f"pk_acct_{sid}", placeholder="예: 000-0000-0000-00")
+        account_holder = c3[2].text_input("예금주 (선택)", key=f"pk_holder_{sid}", placeholder="예: 홍길동")
+        c4 = st.columns(2)
+        proxy = c4[0].text_input("대신 내는 사람 성함 (선택)", key=f"pk_proxy_{sid}")
+        relation = c4[1].text_input("신청인과 관계 (선택)", key=f"pk_rel_{sid}", placeholder="예: 자녀")
+        extra = {
+            "phone": phone,
+            "rrn": rrn,
+            "monthly_income": monthly_income,
+            "address": address,
+            "bank": bank,
+            "account_number": account_number,
+            "account_holder": account_holder,
+            "proxy": proxy,
+            "relation": relation,
+        }
+        if st.button("꾸러미 만들기", type="primary", key=f"pk_make_{sid}", width="stretch"):
+            with st.spinner("기관 양식과 작성 도우미를 채우고 복지로에서 자료를 내려받고 있어요"):
                 try:
-                    ss[f"pk_{s['servId']}"] = packet.build_zip(r, me, extra)
-                except Exception as e:  # 복지로 접속 실패 등
-                    ss.pop(f"pk_{s['servId']}", None)
+                    ss[f"pk_{sid}"] = packet.build_zip(r, me, extra)
+                except Exception as exc:  # 개인정보 보호: 입력값·예외 상세를 화면·로그에 남기지 않는다
+                    ss.pop(f"pk_{sid}", None)
                     st.error("꾸러미를 만들지 못했어요. 인터넷 연결을 확인하고 다시 눌러 주세요.", icon=":material/error:")
-                    with st.expander("개발자용 오류 내용"):
-                        st.exception(e)
-        if made := ss.get(f"pk_{s['servId']}"):
+                    st.caption(f"오류 종류: {type(exc).__name__}")
+        if made := ss.get(f"pk_{sid}"):
             data, failed = made
             st.download_button("ZIP 내려받기", data, file_name=f"신청준비_{s['servNm'][:30]}.zip", mime="application/zip",
-                               icon=":material/download:", width="stretch", key=f"pk_dl_{s['servId']}")
+                               icon=":material/download:", width="stretch", key=f"pk_dl_{sid}")
             if failed:
                 st.warning(f"원본 {len(failed)}개는 복지로에서 받지 못해 주소만 넣었어요: " + ", ".join(failed))
 

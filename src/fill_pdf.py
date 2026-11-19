@@ -512,16 +512,19 @@ def fill_pdf_bytes(
     data: bytes,
     profile: dict[str, str] | None = None,
 ) -> tuple[bytes, dict[str, Any]]:
-    prof = profile or fm.default_profile()
-    y_s, m_s, d_s = prof["apply_date"].replace("년", " ").replace("월", " ").replace("일", " ").split()
+    prof = fm.default_profile() if profile is None else profile
+    date_parts = re.findall(r"\d+", prof.get("apply_date") or "")
+    y_s, m_s, d_s = date_parts[:3] if len(date_parts) >= 3 else ("", "", "")
+    apply_date_dot = (prof.get("apply_date_dot") or "").strip()
+    app_name = (prof.get("applicant.name") or "").strip()
+    app_phone = (prof.get("applicant.phone") or "").strip()
+    app_income = (prof.get("applicant.income_monthly") or "").strip()
     _ensure_font()
 
-    reader = PdfReader(io.BytesIO(data))
-    writer = PdfWriter(clone_from=reader)
     report: dict[str, Any] = {
         "format": "pdf",
         "status": "ok",
-        "pages_total": len(reader.pages),
+        "pages_total": 0,
         "pages_processed": [],
         "found_labels": [],
         "filled_fields": [],
@@ -530,14 +533,46 @@ def fill_pdf_bytes(
         "filled_count": 0,
     }
 
-    if _try_acroform_fill(reader, writer, prof, report):
-        out_buf = io.BytesIO()
-        writer.write(out_buf)
-        return out_buf.getvalue(), report
+    try:
+        reader = PdfReader(io.BytesIO(data))
+        if reader.is_encrypted:
+            try:
+                dec_res = reader.decrypt("")
+            except Exception:
+                dec_res = 0
+            if not dec_res:
+                report["status"] = "error"
+                report["error"] = "pdf_encrypted"
+                return data, report
+        report["pages_total"] = len(reader.pages)
+        writer = PdfWriter(clone_from=reader)
+    except Exception as exc:
+        report["status"] = "error"
+        report["error"] = f"pdf_open_error:{type(exc).__name__}"
+        return data, report
+
+    try:
+        if _try_acroform_fill(reader, writer, prof, report):
+            out_buf = io.BytesIO()
+            writer.write(out_buf)
+            return out_buf.getvalue(), report
+    except Exception as exc:
+        report["status"] = "error"
+        report["error"] = f"pdf_acroform_error:{type(exc).__name__}"
+        report["filled_fields"] = []
+        report["filled_count"] = 0
+        return data, report
 
     page_overlays: list[tuple[int, tuple[float, float, float, float], list[tuple[float, float, str, float, tuple[float, float, float]]]]] = []
 
-    with pdfplumber.open(io.BytesIO(data)) as pdf:
+    try:
+        pdf_ctx = pdfplumber.open(io.BytesIO(data))
+    except Exception as exc:
+        report["status"] = "error"
+        report["error"] = f"pdf_open_error:{type(exc).__name__}"
+        return data, report
+
+    with pdf_ctx as pdf:
         total_chars = sum(len((pg.extract_text() or "").strip()) for pg in pdf.pages)
         total_imgs = sum(len(pg.images) for pg in pdf.pages)
         if total_chars < 30 and total_imgs > 0:
@@ -607,6 +642,8 @@ def fill_pdf_bytes(
                 for seg in _segment_row_by_vlines(r_words, v_lines, max_gap=70.0):
                     seg_txt = " ".join(w["text"] for w in seg).strip()
                     if re.fullmatch(r"(?:20\s*)?년\s*월\s*일", seg_txt):
+                        if not (y_s and m_s and d_s and apply_date_dot):
+                            continue
                         seg_x0 = seg[0]["x0"]
                         left_words = [w["text"] for w in r_words if w["x1"] < seg_x0]
                         row_ctx = " ".join(left_words)
@@ -622,7 +659,7 @@ def fill_pdf_bytes(
                                 "label": seg_txt,
                                 "location": f"p{p_no} y={yc:.1f}",
                                 "field_key": "apply_date",
-                                "value": prof["apply_date_dot"],
+                                "value": apply_date_dot,
                                 "section": "applicant",
                             })
 
@@ -653,12 +690,12 @@ def fill_pdf_bytes(
                     app_w = lbl_grp[0]
                     left_end = lbl_grp[-1]["x1"]
                     gap = sig_w["x0"] - left_end
-                    if gap >= 35:
+                    if app_name and gap >= 35:
                         top_y = min(app_w["top"], sig_w["top"])
                         bot_y = max(app_w["bottom"], sig_w["bottom"])
                         target_r = (left_end + 4, top_y - 2, min(sig_w["x0"] - 10, left_end + 55), bot_y + 2)
                         if not overlaps_placed(target_r):
-                            ok, fs_used, _ = _plan_insert(draw_queue, target_r, prof["applicant.name"], max_fs=9.5, allow_wrap=False)
+                            ok, fs_used, _ = _plan_insert(draw_queue, target_r, app_name, max_fs=9.5, allow_wrap=False)
                             if ok:
                                 placed_rects.append(target_r)
                                 handled_sig_ys.append(yc)
@@ -666,7 +703,7 @@ def fill_pdf_bytes(
                                     "label": "서명란 성명",
                                     "location": f"p{p_no} rect={[round(v, 1) for v in target_r]}",
                                     "field_key": "applicant.name",
-                                    "value": prof["applicant.name"],
+                                    "value": app_name,
                                     "section": "applicant",
                                     "fontsize": fs_used,
                                 })
@@ -699,17 +736,17 @@ def fill_pdf_bytes(
                     if "휴대전화" in txt and cur_sec == "applicant":
                         hp_w = next((w for w in row_words if "휴대전화" in w["text"]), None)
                         em_w = next((w for w in row_words if "이메일" in w["text"] and (hp_w is None or w["x0"] > hp_w["x1"])), None)
-                        if hp_w and em_w and em_w["x0"] - hp_w["x1"] >= 55:
+                        if app_phone and hp_w and em_w and em_w["x0"] - hp_w["x1"] >= 55:
                             target_r = (hp_w["x1"] + 4, cell[1], em_w["x0"] - 4, cell[3])
                             if not _words_in_rect(words, target_r) and not overlaps_placed(target_r):
-                                ok, fs_used, _ = _plan_insert(draw_queue, target_r, prof["applicant.phone"], max_fs=9.0, allow_wrap=False)
+                                ok, fs_used, _ = _plan_insert(draw_queue, target_r, app_phone, max_fs=9.0, allow_wrap=False)
                                 if ok:
                                     placed_rects.append(target_r)
                                     report["filled_fields"].append({
                                         "label": "휴대전화번호",
                                         "location": f"p{p_no} rect={[round(v, 1) for v in target_r]}",
                                         "field_key": "applicant.phone",
-                                        "value": prof["applicant.phone"],
+                                        "value": app_phone,
                                         "section": "applicant",
                                         "fontsize": fs_used,
                                     })
@@ -719,17 +756,17 @@ def fill_pdf_bytes(
                     if re.search(r"월평균\s*소득\s*:", txt):
                         won_w = next((w for w in row_words if w["text"] == "원" and w["x0"] > lb[0] + 40), None)
                         lbl_end = max((w["x1"] for w in row_words if "소득" in w["text"]), default=lb[0] + 60)
-                        if won_w and won_w["x0"] - lbl_end >= 45:
+                        if app_income and won_w and won_w["x0"] - lbl_end >= 45:
                             target_r = (lbl_end + 8, cell[1], won_w["x0"] - 6, cell[3])
                             if not _words_in_rect(words, target_r) and not overlaps_placed(target_r):
-                                ok, fs_used, _ = _plan_insert(draw_queue, target_r, prof["applicant.income_monthly"], max_fs=9.0, allow_wrap=False)
+                                ok, fs_used, _ = _plan_insert(draw_queue, target_r, app_income, max_fs=9.0, allow_wrap=False)
                                 if ok:
                                     placed_rects.append(target_r)
                                     report["filled_fields"].append({
                                         "label": "월평균소득",
                                         "location": f"p{p_no} rect={[round(v, 1) for v in target_r]}",
                                         "field_key": "applicant.income_monthly",
-                                        "value": prof["applicant.income_monthly"],
+                                        "value": app_income,
                                         "section": "applicant",
                                         "fontsize": fs_used,
                                     })
@@ -738,17 +775,17 @@ def fill_pdf_bytes(
                     # '(전화 :     )' 분리형 (예: WLF00001634_1 p6)
                     if txt.startswith("(전화") and cur_sec == "applicant":
                         rparen = next((w for w in row_words if w["text"].strip() == ")" and w["x0"] > lb[2]), None)
-                        if rparen and rparen["x0"] - lb[2] >= 45:
+                        if app_phone and rparen and rparen["x0"] - lb[2] >= 45:
                             target_r = (lb[2] + 3, cell[1], rparen["x0"] - 3, cell[3])
                             if not _words_in_rect(words, target_r) and not overlaps_placed(target_r):
-                                ok, fs_used, _ = _plan_insert(draw_queue, target_r, prof["applicant.phone"], max_fs=8.0, min_fs=5.5, allow_wrap=False)
+                                ok, fs_used, _ = _plan_insert(draw_queue, target_r, app_phone, max_fs=8.0, min_fs=5.5, allow_wrap=False)
                                 if ok:
                                     placed_rects.append(target_r)
                                     report["filled_fields"].append({
                                         "label": "(전화 : )",
                                         "location": f"p{p_no} rect={[round(v, 1) for v in target_r]}",
                                         "field_key": "applicant.phone",
-                                        "value": prof["applicant.phone"],
+                                        "value": app_phone,
                                         "section": "applicant",
                                         "fontsize": fs_used,
                                     })

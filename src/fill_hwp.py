@@ -43,6 +43,15 @@ def _resolve_hwplib_runtime(hwplib_dir: Path | None = None) -> tuple[str, Path, 
     return None
 
 
+def _safe_inspect_tag(stderr: str) -> str:
+    """inspect(개인정보 미포함) 실패 요약 태그를 짧게 뽑는다."""
+    for ln in (stderr or "").splitlines():
+        cleaned = " ".join(ln.strip().split())
+        if cleaned:
+            return cleaned[:120]
+    return ""
+
+
 def fill_hwp_bytes(
     data: bytes,
     profile: dict[str, str] | None = None,
@@ -50,7 +59,7 @@ def fill_hwp_bytes(
     timeout_sec: int = 20,
     hwplib_dir: Path | None = None,
 ) -> tuple[bytes, dict[str, Any]]:
-    prof = profile or fm.default_profile()
+    prof = fm.default_profile() if profile is None else profile
     base_report: dict[str, Any] = {
         "format": "hwp",
         "engine": "hwplib:1.1.10",
@@ -66,6 +75,11 @@ def fill_hwp_bytes(
     if runtime is None:
         base_report["status"] = "unsupported"
         base_report["error"] = "hwplib_runtime_unavailable"
+        return data, base_report
+
+    if data[:8] != b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1":
+        base_report["status"] = "unsupported"
+        base_report["error"] = "not_hwp_ole2"
         return data, base_report
 
     java_bin, jar_path, classes_dir = runtime
@@ -88,19 +102,20 @@ def fill_hwp_bytes(
                 check=False,
             )
         except (OSError, subprocess.SubprocessError) as exc:
-            base_report["status"] = "unsupported"
+            base_report["status"] = "error"
             base_report["error"] = f"hwplib_inspect_error:{type(exc).__name__}"
             return data, base_report
 
         if insp.returncode != 0 or not insp.stdout.strip():
-            base_report["status"] = "unsupported"
-            base_report["error"] = "hwplib_inspect_failed"
+            tag = _safe_inspect_tag(insp.stderr)
+            base_report["status"] = "error"
+            base_report["error"] = f"hwplib_inspect_failed:{tag}" if tag else "hwplib_inspect_failed"
             return data, base_report
 
         try:
             doc_dump = json.loads(insp.stdout)
         except json.JSONDecodeError:
-            base_report["status"] = "unsupported"
+            base_report["status"] = "error"
             base_report["error"] = "hwplib_inspect_invalid_json"
             return data, base_report
 
@@ -134,22 +149,22 @@ def fill_hwp_bytes(
                 check=False,
             )
         except (OSError, subprocess.SubprocessError) as exc:
-            base_report["status"] = "unsupported"
+            base_report["status"] = "error"
             base_report["error"] = f"hwplib_fill_error:{type(exc).__name__}"
             base_report["filled_fields"] = []
             base_report["filled_count"] = 0
             return data, base_report
 
         if res.returncode != 0 or not out_path.is_file():
-            base_report["status"] = "unsupported"
-            base_report["error"] = "hwplib_fill_failed"
+            base_report["status"] = "error"
+            base_report["error"] = f"hwplib_fill_failed:rc={res.returncode}"
             base_report["filled_fields"] = []
             base_report["filled_count"] = 0
             return data, base_report
 
         out_bytes = out_path.read_bytes()
         if not out_bytes:
-            base_report["status"] = "unsupported"
+            base_report["status"] = "error"
             base_report["error"] = "hwplib_empty_output"
             base_report["filled_fields"] = []
             base_report["filled_count"] = 0

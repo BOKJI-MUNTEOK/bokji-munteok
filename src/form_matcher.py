@@ -114,13 +114,25 @@ def default_profile(today: date | None = None) -> dict[str, str]:
     }
 
 
+def _fill_or_skip(
+    prof: dict[str, str],
+    field_key: str,
+    reason: str,
+    section: str,
+) -> MatchDecision:
+    val = (prof.get(field_key) or "").strip()
+    if not val:
+        return MatchDecision("skip", field_key=field_key, reason="missing_profile_value", section=section)
+    return MatchDecision("fill", field_key=field_key, value=val, reason=reason, section=section)
+
+
 def match_label(
     raw_label: str,
     section: str = "applicant",
     profile: dict[str, str] | None = None,
 ) -> MatchDecision:
     """라벨 텍스트와 현재 구역(applicant/proxy/excluded)을 기반으로 매칭 결정을 내린다."""
-    prof = profile or default_profile()
+    prof = default_profile() if profile is None else profile
     label_clean = re.sub(r"\s+", " ", (raw_label or "")).strip()
     norm = normalize_label(label_clean)
 
@@ -152,49 +164,19 @@ def match_label(
     ):
         if eff_section == "proxy":
             return MatchDecision("skip", reason="no_proxy_rrn_in_profile", section=eff_section)
-        return MatchDecision(
-            "fill",
-            field_key="applicant.rrn",
-            value=prof["applicant.rrn"],
-            reason="matched_rrn",
-            section=eff_section,
-        )
+        return _fill_or_skip(prof, "applicant.rrn", "matched_rrn", eff_section)
 
     # 5. 계좌 관련 항목 (예금주 / 은행·금융기관 / 계좌번호)
     if norm in ("예금주", "예금주명", "예금주성명"):
-        return MatchDecision(
-            "fill",
-            field_key="account.holder",
-            value=prof["account.holder"],
-            reason="matched_account_holder",
-            section=eff_section,
-        )
+        return _fill_or_skip(prof, "account.holder", "matched_account_holder", eff_section)
     if norm in ("은행명", "금융기관", "금융기관명", "거래은행", "입금은행", "은행", "은행기관명"):
-        return MatchDecision(
-            "fill",
-            field_key="account.bank",
-            value=prof["account.bank"],
-            reason="matched_account_bank",
-            section=eff_section,
-        )
+        return _fill_or_skip(prof, "account.bank", "matched_account_bank", eff_section)
     if norm in ("계좌번호", "입금계좌번호", "수령계좌번호", "계좌", "신청인명의의계좌번호"):
-        return MatchDecision(
-            "fill",
-            field_key="account.number",
-            value=prof["account.number"],
-            reason="matched_account_number",
-            section=eff_section,
-        )
+        return _fill_or_skip(prof, "account.number", "matched_account_number", eff_section)
 
     # 6. 월 소득 (연간소득·가구원·배우자 소득은 이미 위에서 차단)
     if norm in ("월평균소득", "월소득", "월소득액", "월평균소득액"):
-        return MatchDecision(
-            "fill",
-            field_key="applicant.income_monthly",
-            value=prof["applicant.income_monthly"],
-            reason="matched_monthly_income",
-            section=eff_section,
-        )
+        return _fill_or_skip(prof, "applicant.income_monthly", "matched_monthly_income", eff_section)
 
     # 7. 성명
     if norm in (
@@ -204,30 +186,18 @@ def match_label(
         "위임하는사람성명", "위임받는사람성명",
     ) or re.fullmatch(r"(신청인|대상자|대리인|위임인|수임인|본인|신청자)?성명", norm):
         key = "proxy.name" if eff_section == "proxy" else "applicant.name"
-        return MatchDecision("fill", field_key=key, value=prof[key], reason="matched_name", section=eff_section)
+        return _fill_or_skip(prof, key, "matched_name", eff_section)
 
     # 8. 생년월일
     if norm in ("생년월일", "출생연월일", "출생년월일", "신청인생년월일", "대상자생년월일"):
         if eff_section == "proxy":
             return MatchDecision("skip", reason="no_proxy_birth_date_in_profile", section=eff_section)
-        return MatchDecision(
-            "fill",
-            field_key="applicant.birth_date",
-            value=prof["applicant.birth_date"],
-            reason="matched_birth_date",
-            section=eff_section,
-        )
+        return _fill_or_skip(prof, "applicant.birth_date", "matched_birth_date", eff_section)
 
     # 9. 신청인과의 관계 (대리인 구역이거나 명시적 문구일 때만)
     if norm in ("관계", "신청인과의관계", "신청인과관계", "대상자와의관계", "본인과의관계", "장애인과의관계"):
         if eff_section == "proxy" or "신청인" in norm or "대상자" in norm or "본인" in norm or "장애인" in norm:
-            return MatchDecision(
-                "fill",
-                field_key="proxy.relation",
-                value=prof["proxy.relation"],
-                reason="matched_relation",
-                section="proxy",
-            )
+            return _fill_or_skip(prof, "proxy.relation", "matched_relation", "proxy")
         return MatchDecision("skip", reason="ambiguous_relation_section", section=eff_section)
 
     # 10. 휴대전화 / 연락처 / 전화번호
@@ -237,28 +207,16 @@ def match_label(
         if "자택" in norm or "집전화" in norm:
             return MatchDecision("skip", reason="home_phone_not_mobile", section=eff_section)
         key = "proxy.phone" if eff_section == "proxy" else "applicant.phone"
-        return MatchDecision("fill", field_key=key, value=prof[key], reason="matched_phone", section=eff_section)
+        return _fill_or_skip(prof, key, "matched_phone", eff_section)
 
     # 11. 주소 / 거주지
     if norm in ("주소", "현주소", "거주지", "주민등록상주소", "주민등록주소", "주민등록지", "신청인주소", "대상자주소"):
         if eff_section == "proxy":
             return MatchDecision("skip", reason="no_proxy_address_in_profile", section=eff_section)
-        return MatchDecision(
-            "fill",
-            field_key="applicant.address",
-            value=prof["applicant.address"],
-            reason="matched_address",
-            section=eff_section,
-        )
+        return _fill_or_skip(prof, "applicant.address", "matched_address", eff_section)
 
     # 12. 신청일 / 작성일
     if norm in ("신청일", "신청일자", "작성일", "작성일자", "제출일"):
-        return MatchDecision(
-            "fill",
-            field_key="apply_date",
-            value=prof["apply_date_dot"],
-            reason="matched_apply_date",
-            section=eff_section,
-        )
+        return _fill_or_skip(prof, "apply_date_dot", "matched_apply_date", eff_section)
 
     return MatchDecision("skip", reason="unmatched_label", section=eff_section)

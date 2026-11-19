@@ -44,7 +44,11 @@ def _plan_inline_line(
             return None
         m_20 = re.match(r"^(\s*20)(\s+)(년)(\s+)(월)(\s+)(일\s*)$", raw)
         m_plain = re.match(r"^(\s*)(년)(\s+)(월)(\s+)(일\s*)$", raw)
-        yr, mo, dy = prof["apply_date"].replace("년", " ").replace("월", " ").replace("일", " ").split()
+        date_parts = re.findall(r"\d+", prof.get("apply_date") or "")
+        if len(date_parts) < 3:
+            return None
+        yr, mo, dy = date_parts[:3]
+        apply_date_val = (prof.get("apply_date") or f"{yr}년 {mo}월 {dy}일").strip()
         if m_20:
             yr2 = yr[-2:]
             lead20, sp_20y, s_y, sp_ym, s_m, sp_md, s_d = m_20.groups()
@@ -54,9 +58,9 @@ def _plan_inline_line(
             new_text = f"{lead20}{yr2}{sp_20y2}{s_y}{sp_ym2}{s_m}{sp_md2}{s_d}"
             report["filled_fields"].append({
                 "label": stripped, "location": location, "field_key": "apply_date",
-                "value": prof["apply_date"], "section": "applicant",
+                "value": apply_date_val, "section": "applicant",
             })
-            return {"mode": "date20", "orig_text": raw, "new_text": new_text, "field_key": "apply_date", "value": prof["apply_date"]}
+            return {"mode": "date20", "orig_text": raw, "new_text": new_text, "field_key": "apply_date", "value": apply_date_val}
         if m_plain:
             lead, s_y, sp_ym, s_m, sp_md, s_d = m_plain.groups()
             trim = min(max(0, len(lead) - 2), len(yr) + len(mo) + len(dy) + 2)
@@ -66,9 +70,9 @@ def _plan_inline_line(
             new_text = f"{lead2}{yr}{s_y}{sp_ym2}{s_m}{sp_md2}{s_d}"
             report["filled_fields"].append({
                 "label": stripped, "location": location, "field_key": "apply_date",
-                "value": prof["apply_date"], "section": "applicant",
+                "value": apply_date_val, "section": "applicant",
             })
-            return {"mode": "date", "orig_text": raw, "new_text": new_text, "field_key": "apply_date", "value": prof["apply_date"]}
+            return {"mode": "date", "orig_text": raw, "new_text": new_text, "field_key": "apply_date", "value": apply_date_val}
         return None
 
     # 2) 인라인 성명 + 서명 줄 ('신청인 :     (서명 또는 인)' / '성 명:    (서명 또는 인)' / '신청인      (서명 또는 인)')
@@ -78,8 +82,8 @@ def _plan_inline_line(
     )
     if m_sig:
         pre, mid_ws, suf = m_sig.groups()
-        name = prof["applicant.name"]
-        if len(mid_ws) >= len(name) + 6:
+        name = (prof.get("applicant.name") or "").strip()
+        if name and len(mid_ws) >= len(name) + 6:
             rem = len(mid_ws) - len(name) - 1
             new_text = f"{pre} {name}{' ' * rem}{suf}"
             report["filled_fields"].append({
@@ -102,7 +106,7 @@ def _can_fill_address_cell_first_line(cell_text: str) -> int | None:
 
 
 def plan_hwp_fills(doc_dump: dict[str, Any], profile: dict[str, str] | None = None) -> dict[str, Any]:
-    prof = profile or fm.default_profile()
+    prof = fm.default_profile() if profile is None else profile
     report: dict[str, Any] = {
         "found_labels": [],
         "filled_fields": [],
@@ -231,11 +235,20 @@ def plan_hwp_fills(doc_dump: dict[str, Any], profile: dict[str, str] | None = No
                                     **ed,
                                 })
 
-                # (b) 셀 안에 '[핸드폰]' / '휴대전화' 단독 문단이 있는 경우 같은 줄 끝에 번호 추가 (단 excluded 제외)
-                if local_sec != "excluded" and len(lines) == 1:
+                # (b) 셀 안에 '[핸드폰]' / '휴대전화' 단독 문단이 있는 경우 같은 줄 끝에 번호 추가 (오른쪽 빈 값 셀이 있으면 건너뜀)
+                rs_c, cs_c = max(1, c.get("row_span", 1)), max(1, c.get("col_span", 1))
+                right_neighbor_cell = grid.get((c["row"], c["col"] + cs_c))
+                if (
+                    local_sec != "excluded"
+                    and len(lines) == 1
+                    and not (right_neighbor_cell is not None and fm.is_cell_empty(right_neighbor_cell.get("text", "")))
+                ):
                     s_clean = re.sub(r"\s+", "", raw_text)
                     if s_clean in ("[핸드폰]", "휴대전화", "휴대폰"):
                         key_p = "proxy.phone" if local_sec == "proxy" else "applicant.phone"
+                        phone_val = (prof.get(key_p) or "").strip()
+                        if not phone_val:
+                            continue
                         k = (t_idx, c["cell_idx"], 0, "append")
                         if k not in filled_cell_ops:
                             filled_cell_ops.add(k)
@@ -250,23 +263,21 @@ def plan_hwp_fills(doc_dump: dict[str, Any], profile: dict[str, str] | None = No
                                 "col": c["col"],
                                 "mode": "append",
                                 "orig_text": raw_text,
-                                "new_text": raw_text.rstrip() + " " + prof[key_p],
+                                "new_text": raw_text.rstrip() + " " + phone_val,
                                 "field_key": key_p,
-                                "value": prof[key_p],
+                                "value": phone_val,
                             })
                             report["filled_fields"].append({
                                 "label": raw_text.strip(),
                                 "location": f"T{t_idx}({c['row']},{c['col']})",
                                 "field_key": key_p,
-                                "value": prof[key_p],
+                                "value": phone_val,
                                 "section": local_sec,
                             })
                         continue
 
                 # (c) 셀 위쪽 문단에 라벨('금융기관명', '신청인 명의의 계좌번호')이 있고 아래 문단(p1+)이 비어 있는 경우
                 # 단, 오른쪽에 인접 셀이 없는(또는 오른쪽이 비어있지 않은) 1칸 통합형 라벨+값 셀일 때만 적용!
-                rs_c, cs_c = max(1, c.get("row_span", 1)), max(1, c.get("col_span", 1))
-                right_neighbor_cell = grid.get((c["row"], c["col"] + cs_c))
                 if (
                     local_sec != "excluded"
                     and len(lines) >= 2
@@ -305,7 +316,10 @@ def plan_hwp_fills(doc_dump: dict[str, Any], profile: dict[str, str] | None = No
 
                 # (d) 셀 내 '(전화번호 :       )' / '휴대전화번호:' 인라인 삽입
                 if local_sec == "applicant":
+                    app_phone = (prof.get("applicant.phone") or "").strip()
                     for l_idx, ln in enumerate(lines):
+                        if not app_phone:
+                            break
                         if "휴대전화번호:" in ln:
                             k = (t_idx, c["cell_idx"], l_idx, "after_anchor")
                             if k not in filled_cell_ops:
@@ -324,15 +338,15 @@ def plan_hwp_fills(doc_dump: dict[str, Any], profile: dict[str, str] | None = No
                                         "mode": "after_anchor",
                                         "anchor": "휴대전화번호:",
                                         "orig_text": ln,
-                                        "new_text": ln[:m_hp.end(1)] + " " + prof["applicant.phone"] + ln[m_hp.end(1):],
+                                        "new_text": ln[:m_hp.end(1)] + " " + app_phone + ln[m_hp.end(1):],
                                         "field_key": "applicant.phone",
-                                        "value": prof["applicant.phone"],
+                                        "value": app_phone,
                                     })
                                     report["filled_fields"].append({
                                         "label": "휴대전화번호:",
                                         "location": f"T{t_idx}({c['row']},{c['col']}) p{l_idx}",
                                         "field_key": "applicant.phone",
-                                        "value": prof["applicant.phone"],
+                                        "value": app_phone,
                                         "section": "applicant",
                                     })
                         elif re.search(r"\(전화(?:번호)?\s*:\s*\)", re.sub(r"\s{2,}", " ", ln)):
@@ -353,15 +367,15 @@ def plan_hwp_fills(doc_dump: dict[str, Any], profile: dict[str, str] | None = No
                                         "mode": "after_anchor",
                                         "anchor": m_ph.group(1),
                                         "orig_text": ln,
-                                        "new_text": ln[:m_ph.end(1)] + " " + prof["applicant.phone"] + ln[m_ph.end(1):],
+                                        "new_text": ln[:m_ph.end(1)] + " " + app_phone + ln[m_ph.end(1):],
                                         "field_key": "applicant.phone",
-                                        "value": prof["applicant.phone"],
+                                        "value": app_phone,
                                     })
                                     report["filled_fields"].append({
                                         "label": "(전화번호 : )",
                                         "location": f"T{t_idx}({c['row']},{c['col']}) p{l_idx}",
                                         "field_key": "applicant.phone",
-                                        "value": prof["applicant.phone"],
+                                        "value": app_phone,
                                         "section": "applicant",
                                     })
 

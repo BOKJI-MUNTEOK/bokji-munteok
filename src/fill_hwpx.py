@@ -151,7 +151,11 @@ def _fill_inline_paragraphs(
                 })
                 continue
 
-            yr, mo, dy = profile["apply_date"].replace("년", " ").replace("월", " ").replace("일", " ").split()
+            date_parts = re.findall(r"\d+", profile.get("apply_date") or "")
+            if len(date_parts) < 3:
+                continue
+            yr, mo, dy = date_parts[:3]
+            apply_date_val = (profile.get("apply_date") or f"{yr}년 {mo}월 {dy}일").strip()
             # '20   년   월   일'처럼 '20'이 고정돼 있으면 두 자리 연도('26')는 검증 허용목록 충돌로 건너뛰고 보고
             m_20 = re.match(r"^(\s*20)(\s+)(년)(\s+)(월)(\s+)(일\s*)$", raw)
             m_plain = re.match(r"^(\s*)(년)(\s+)(월)(\s+)(일\s*)$", raw)
@@ -186,7 +190,7 @@ def _fill_inline_paragraphs(
                             "label": stripped,
                             "location": f"{location_prefix}, p{pi}",
                             "field_key": "apply_date",
-                            "value": profile["apply_date"],
+                            "value": apply_date_val,
                             "section": "applicant",
                         })
                         filled += 1
@@ -223,7 +227,7 @@ def _fill_inline_paragraphs(
                             "label": stripped,
                             "location": f"{location_prefix}, p{pi}",
                             "field_key": "apply_date",
-                            "value": profile["apply_date"],
+                            "value": apply_date_val,
                             "section": "applicant",
                         })
                         filled += 1
@@ -237,15 +241,16 @@ def _fill_inline_paragraphs(
         )
         if m_sig:
             prefix, mid_ws, suffix = m_sig.group(1), m_sig.group(2), m_sig.group(3)
+            app_name = (profile.get("applicant.name") or "").strip()
             # 단, '성명'이 이미 명시된 경우에만 이름을 넣거나, ':' 바로 뒤 앞부분에 이름 넣고 뒷부분은 서명 여백으로 유지
-            if "성명" in prefix or "성 명" in prefix or len(mid_ws) >= 12:
+            if app_name and ("성명" in prefix or "성 명" in prefix or len(mid_ws) >= 12):
                 # 앞부분에 이름만 넣고 뒤 공백과 (서명...)은 그대로 유지
-                if _insert_into_inline_whitespace(p_el, ":", profile["applicant.name"]):
+                if _insert_into_inline_whitespace(p_el, ":", app_name):
                     report["filled_fields"].append({
                         "label": prefix.strip(),
                         "location": f"{location_prefix}, p{pi}",
                         "field_key": "applicant.name",
-                        "value": profile["applicant.name"],
+                        "value": app_name,
                         "section": "applicant",
                     })
                     report["sensitive_blank_fields"].append({
@@ -328,7 +333,7 @@ def fill_hwpx_bytes(
     data: bytes,
     profile: dict[str, str] | None = None,
 ) -> tuple[bytes, dict[str, Any]]:
-    prof = profile or fm.default_profile()
+    prof = fm.default_profile() if profile is None else profile
     report: dict[str, Any] = {
         "format": "hwpx",
         "status": "ok",
@@ -342,8 +347,8 @@ def fill_hwpx_bytes(
     try:
         zin_ctx = zipfile.ZipFile(io.BytesIO(data), "r")
     except zipfile.BadZipFile:
-        report["status"] = "unsupported"
-        report["error"] = "invalid_hwpx_zip"
+        report["status"] = "error"
+        report["error"] = "hwpx_bad_zip"
         return data, report
 
     with zin_ctx as zin:
@@ -357,15 +362,22 @@ def fill_hwpx_bytes(
         names = [info.filename for info in infos]
         sec_names = sorted(n for n in names if n.startswith("Contents/section") and n.endswith(".xml"))
         if not sec_names:
-            report["status"] = "failed"
-            report["error"] = "no_section_xml"
+            report["status"] = "error"
+            report["error"] = "hwpx_no_sections"
             return data, report
 
         updated_sections: dict[str, bytes] = {}
         filled_tcs: set[int] = set()
 
         for sec_name in sec_names:
-            root = etree.fromstring(zin.read(sec_name), parser=SAFE_XML_PARSER)
+            try:
+                root = etree.fromstring(zin.read(sec_name), parser=SAFE_XML_PARSER)
+            except (etree.XMLSyntaxError, ValueError, KeyError, zipfile.BadZipFile) as exc:
+                report["status"] = "error"
+                report["error"] = f"hwpx_xml_error:{type(exc).__name__}"
+                report["filled_fields"] = []
+                report["filled_count"] = 0
+                return data, report
             tables = root.xpath(".//*[local-name()='tbl']")
 
             _fill_inline_paragraphs(root.xpath("./*[local-name()='p']"), prof, f"{sec_name} top", report)

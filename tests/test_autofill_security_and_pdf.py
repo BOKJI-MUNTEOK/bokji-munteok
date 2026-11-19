@@ -1,12 +1,16 @@
 """보안(.hwpx ZIP 상한·XXE 차단), PDF 회전·CropBox·AcroForm, HWP/청약서 기입 규칙 단위 테스트."""
 from __future__ import annotations
 
+import ast
 import io
+import json
+import re
 import sys
 import tempfile
 import unittest
 import zipfile
 from pathlib import Path
+from unittest.mock import patch
 
 import pdfplumber
 from pypdf import PdfReader, PdfWriter
@@ -26,6 +30,7 @@ SRC_DIR = Path(__file__).resolve().parent.parent / "src"
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
+import fill_form  # noqa: E402
 import fill_hwp  # noqa: E402
 import fill_hwp_plan  # noqa: E402
 import fill_hwpx  # noqa: E402
@@ -247,6 +252,287 @@ class TestAutofillSecurityAndEngines(unittest.TestCase):
         self.assertIn(("account.bank", "add_para"), modes_by_key)
         # 1회보험료 입금확인 셀 날짜는 건너뛰어야 함
         self.assertNotIn(("apply_date", "date"), modes_by_key)
+
+    def test_hwp_plan_phone_label_prefers_empty_right_cell(self) -> None:
+        doc_dump = {
+            "paragraphs": [],
+            "tables": [{
+                "section": 0, "para": 0, "control": 0, "row_count": 1, "col_count": 2,
+                "cells": [
+                    {"cell_idx": 0, "row": 0, "col": 0, "row_span": 1, "col_span": 1, "text": "휴대전화"},
+                    {"cell_idx": 1, "row": 0, "col": 1, "row_span": 1, "col_span": 1, "text": ""},
+                ],
+            }],
+        }
+        plan = fill_hwp_plan.plan_hwp_fills(doc_dump)
+        self.assertEqual(len(plan["cell_edits"]), 1)
+        ed = plan["cell_edits"][0]
+        self.assertEqual(ed["cell_idx"], 1)
+        self.assertEqual(ed["mode"], "set")
+        self.assertEqual(ed["field_key"], "applicant.phone")
+
+    def test_fill_form_dispatch_and_unsupported(self) -> None:
+        sec_xml = (
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            '<hs:sec xmlns:hs="http://www.hancom.co.kr/hwpml/2011/section" '
+            'xmlns:hp="http://www.hancom.co.kr/hwpml/2011/paragraph">'
+            '<hp:p><hp:run><hp:t>신청인 :               (서명)</hp:t></hp:run></hp:p>'
+            '</hs:sec>'
+        ).encode("utf-8")
+        hwpx_raw = _make_minimal_hwpx(sec_xml)
+        out_hwpx, rep_hwpx = fill_form.fill_form(hwpx_raw, "신청서.hwpx")
+        self.assertEqual(rep_hwpx["detected_format"], "hwpx")
+        self.assertEqual(rep_hwpx["status"], "ok")
+        self.assertGreater(rep_hwpx["filled_count"], 0)
+        self.assertNotEqual(out_hwpx, hwpx_raw)
+
+        # 지원하지 않는 형식 (zip / xlsx / xls / jpg) -> 원본 그대로 + unsupported
+        xlsx_buf = io.BytesIO()
+        with zipfile.ZipFile(xlsx_buf, "w") as zf:
+            zf.writestr("xl/workbook.xml", b"<workbook/>")
+        for fname, raw in (
+            ("서식모음.zip", _make_minimal_hwpx(sec_xml).replace(b"Contents/section0.xml", b"readme.txt")),
+            ("명단.xlsx", xlsx_buf.getvalue()),
+            ("명단.xls", b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1" + b"W\x00o\x00r\x00k\x00b\x00o\x00o\x00k\x00"),
+            ("스캔.jpg", b"\xff\xd8\xff\xe0dummy"),
+        ):
+            out_u, rep_u = fill_form.fill_form(raw, fname)
+            self.assertEqual(out_u, raw)
+            self.assertEqual(rep_u["status"], "unsupported")
+            self.assertEqual(rep_u["filled_count"], 0)
+
+    def test_empty_profile_never_fills_dummy_defaults(self) -> None:
+        self.assertEqual(fill_form.build_profile(None, {}), {})
+        prof_rrn = fill_form.build_profile({"name": "홍길동"}, {"rrn": "5001011234567"})
+        self.assertEqual(prof_rrn["applicant.rrn"], "500101-1234567")
+        self.assertEqual(prof_rrn["applicant.birth_date"], "1950-01-01")
+
+        sec_xml = (
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            '<hs:sec xmlns:hs="http://www.hancom.co.kr/hwpml/2011/section" '
+            'xmlns:hp="http://www.hancom.co.kr/hwpml/2011/paragraph">'
+            '<hp:p><hp:run><hp:t>신청인 :               (서명)</hp:t></hp:run></hp:p>'
+            '</hs:sec>'
+        ).encode("utf-8")
+        hwpx_raw = _make_minimal_hwpx(sec_xml)
+        out_hwpx, rep_hwpx = fill_form.fill_form(hwpx_raw, "신청서.hwpx", profile={})
+        self.assertEqual(out_hwpx, hwpx_raw)
+        self.assertEqual(rep_hwpx["status"], "no_fillable_fields")
+        self.assertEqual(rep_hwpx["filled_count"], 0)
+        with zipfile.ZipFile(io.BytesIO(out_hwpx), "r") as zin:
+            self.assertNotIn("홍길동", zin.read("Contents/section0.xml").decode("utf-8"))
+
+        # 빈 프로필로 PDF 실행 시에도 가상값이 들어가지 않음
+        buf = io.BytesIO()
+        c = Canvas(buf, pagesize=(400, 300))
+        c.rect(50, 180, 80, 30)
+        c.rect(130, 180, 180, 30)
+        c.save()
+        out_pdf, rep_pdf = fill_form.fill_form(buf.getvalue(), "빈양식.pdf", profile={})
+        self.assertEqual(out_pdf, buf.getvalue())
+        self.assertEqual(rep_pdf["filled_count"], 0)
+
+    def test_packet_build_zip_autofill_and_manual_notice(self) -> None:
+        sec_xml = (
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            '<hs:sec xmlns:hs="http://www.hancom.co.kr/hwpml/2011/section" '
+            'xmlns:hp="http://www.hancom.co.kr/hwpml/2011/paragraph">'
+            '<hp:p><hp:run><hp:t>신청인 :               (서명)</hp:t></hp:run></hp:p>'
+            '</hs:sec>'
+        ).encode("utf-8")
+        hwpx_raw = _make_minimal_hwpx(sec_xml)
+        xlsx_buf = io.BytesIO()
+        with zipfile.ZipFile(xlsx_buf, "w") as zf:
+            zf.writestr("xl/workbook.xml", b"<workbook/>")
+        xlsx_raw = xlsx_buf.getvalue()
+        ref_raw = b"%PDF-1.4\n%reference\n"
+
+        row = {
+            "svc": {
+                "servId": "TEST_PK_01",
+                "servNm": "테스트복지서비스",
+                "org": "구로구",
+                "region": "서울특별시 구로구",
+                "contact": "129",
+                "link": "",
+                "form_files": [
+                    {"name": "지원신청서.hwpx", "url": "https://example.invalid/a.hwpx"},
+                    {"name": "소득확인서식.xlsx", "url": "https://example.invalid/b.xlsx"},
+                    {"name": "사업공고문.pdf", "url": "https://example.invalid/c.pdf"},
+                ],
+            },
+            "ai": None,
+            "ext": {"documents": ["신분증"]},
+        }
+        files = {
+            "https://example.invalid/a.hwpx": hwpx_raw,
+            "https://example.invalid/b.xlsx": xlsx_raw,
+            "https://example.invalid/c.pdf": ref_raw,
+        }
+        p = {"name": "홍길동", "sido": "서울특별시", "sgg": "구로구", "age": 76}
+        extra = {
+            "phone": "010-0000-0000",
+            "rrn": "500101-1234567",
+            "monthly_income": "1,000,000",
+            "address": "가마산로 000",
+            "bank": "농협",
+            "account_number": "000-0000-0000-00",
+            "account_holder": "홍길동",
+            "proxy": "김대리",
+            "relation": "자녀",
+        }
+        zip_bytes, failed = packet.build_zip(row, p, extra, fetch=files.__getitem__)
+        self.assertEqual(failed, [])
+        with zipfile.ZipFile(io.BytesIO(zip_bytes), "r") as zout:
+            names = zout.namelist()
+            self.assertIn("2_기관양식(작성해서 제출)/작성됨_지원신청서.hwpx", names)
+            self.assertIn("2_기관양식(작성해서 제출)/소득확인서식.xlsx", names)
+            self.assertIn("3_참고자료(읽어 보기)/사업공고문.pdf", names)
+            self.assertEqual(zout.read("2_기관양식(작성해서 제출)/소득확인서식.xlsx"), xlsx_raw)
+            with zipfile.ZipFile(io.BytesIO(zout.read("2_기관양식(작성해서 제출)/작성됨_지원신청서.hwpx")), "r") as zh:
+                sec_out = zh.read("Contents/section0.xml").decode("utf-8")
+                self.assertIn("신청인 : 홍길동", sec_out)
+                self.assertIn("(서명)", sec_out)
+
+            pdf_name = next(n for n in names if n.startswith("1_신청준비_") and n.endswith(".pdf"))
+            with pdfplumber.open(io.BytesIO(zout.read(pdf_name))) as pdf:
+                full_text = "\n".join((pg.extract_text() or "") for pg in pdf.pages)
+                self.assertIn("직접 작성 필요", full_text)
+                self.assertIn("소득확인서식.xlsx", full_text)
+                self.assertIn("신청서 작성 도우미", full_text)
+                self.assertIn("위임장 도우미", full_text)
+                self.assertIn("500101-*******", full_text)
+                self.assertNotIn("500101-1234567", full_text)
+
+    def test_privacy_rules_cache_and_error_redaction(self) -> None:
+        app_path = Path(__file__).resolve().parent.parent / "app.py"
+        tree = ast.parse(app_path.read_text(encoding="utf-8"))
+        forbidden_arg_tokens = ("profile", "me", "extra", "rrn", "phone", "account", "income", "address", "pii")
+
+        # 1. @st.cache_data / @st.cache_resource 함수 인자에 개인정보 없음
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.FunctionDef):
+                continue
+            is_cached = any(
+                (isinstance(d, ast.Attribute) and d.attr in ("cache_data", "cache_resource"))
+                or (
+                    isinstance(d, ast.Call)
+                    and isinstance(d.func, ast.Attribute)
+                    and d.func.attr in ("cache_data", "cache_resource")
+                )
+                for d in node.decorator_list
+            )
+            if is_cached:
+                args = [a.arg.lower() for a in node.args.args + node.args.kwonlyargs]
+                for arg in args:
+                    for tok in forbidden_arg_tokens:
+                        self.assertNotIn(tok, arg, f"cached function {node.name} accepts PII arg {arg}")
+
+        # 2. packet_box 내부에 type="password" 사용 및 st.exception 미사용 확인
+        pkt_fn = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "packet_box")
+        has_password_rrn = False
+        for node in ast.walk(pkt_fn):
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+                if node.func.attr == "exception":
+                    self.fail("packet_box must not call st.exception (risk of leaking user input)")
+                if node.func.attr == "text_input":
+                    for kw in node.keywords:
+                        if kw.arg == "type" and isinstance(kw.value, ast.Constant) and kw.value.value == "password":
+                            has_password_rrn = True
+        self.assertTrue(has_password_rrn, "packet_box must mask RRN input with type='password'")
+
+        # 3. 내부 엔진 예외에 주민번호/계좌가 들어 있어도 fill_form 보고/오류 문자열에 남지 않음
+        sec_xml = b"<hs:sec xmlns:hs='http://www.hancom.co.kr/hwpml/2011/section'><hs:p/></hs:sec>"
+        hwpx_raw = _make_minimal_hwpx(sec_xml)
+        with patch("fill_hwpx.fill_hwpx_bytes", side_effect=RuntimeError("leak 500101-1234567 000-0000-0000-00")):
+            out_bytes, rep = fill_form.fill_form(hwpx_raw, "a.hwpx", profile={"applicant.rrn": "500101-1234567"})
+        self.assertEqual(out_bytes, hwpx_raw)
+        self.assertEqual(rep["status"], "error")
+        dumped = json.dumps(rep, ensure_ascii=False)
+        self.assertIsNone(re.search(r"\d{6}-\d{7}", dumped))
+        self.assertNotIn("000-0000-0000-00", dumped)
+
+    def test_app_packet_zip_flow_apptest(self) -> None:
+        import base64
+        import streamlit as st
+        from streamlit.testing.v1 import AppTest
+        from parse import load_all
+
+        st.cache_data.clear()
+        st.cache_resource.clear()
+        self.addCleanup(st.cache_data.clear)
+        self.addCleanup(st.cache_resource.clear)
+
+        root = Path(__file__).resolve().parent.parent
+        sample = load_all(root / "data" / "sample")
+        svc = next(s for s in sample if any(packet.is_form(f["name"]) for f in s.get("form_files", [])))
+        sid = svc["servId"]
+
+        sec_xml = (
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            '<hs:sec xmlns:hs="http://www.hancom.co.kr/hwpml/2011/section" '
+            'xmlns:hp="http://www.hancom.co.kr/hwpml/2011/paragraph">'
+            '<hp:p><hp:run><hp:t>신청인 :               (서명)</hp:t></hp:run></hp:p>'
+            '</hs:sec>'
+        ).encode("utf-8")
+        hwpx_b64 = base64.b64encode(_make_minimal_hwpx(sec_xml)).decode("ascii")
+
+        def run_packet_ui(repo_dir: str, serv_id: str, fake_hwpx_b64: str) -> None:
+            import base64 as _b64
+            import sys as _sys
+            from pathlib import Path as _Path
+            from unittest.mock import patch as _patch
+
+            _root = _Path(repo_dir)
+            for _p in (str(_root), str(_root / "src")):
+                if _p not in _sys.path:
+                    _sys.path.insert(0, _p)
+            import app as _app
+            import packet as _packet
+            from parse import load_all as _load_all
+            from pipeline import build as _build
+
+            _sample = _load_all(_root / "data" / "sample")
+            _svc = next(x for x in _sample if x["servId"] == serv_id)
+            _row = _build(dict(_app.W), "규칙", [_svc])[0]
+            _raw = _b64.b64decode(fake_hwpx_b64)
+
+            def _fake_dl(url: str, timeout: int = 15) -> bytes:
+                return _raw
+
+            with _patch.object(_packet, "download", side_effect=_fake_dl):
+                _app.packet_box(_row)
+
+        with patch("welfare_api.WelfareAPI") as m_api:
+            m_api.return_value.catalog.return_value = {
+                "services": sample,
+                "counts": {"central": 25, "local": 25},
+                "updated_at": 1794873600,
+                "warnings": [],
+            }
+            m_api.return_value.services.return_value = sample
+            at = AppTest.from_function(run_packet_ui, args=(str(root), sid, hwpx_b64), default_timeout=60).run()
+            self.assertFalse(at.exception, at.exception)
+
+            at.text_input(key=f"pk_name_{sid}").input("홍길동")
+            at.text_input(key=f"pk_phone_{sid}").input("010-0000-0000")
+            at.text_input(key=f"pk_rrn_{sid}").input("500101-1234567")
+            at.text_input(key=f"pk_income_{sid}").input("1,000,000")
+            at.text_input(key=f"pk_addr_{sid}").input("서울특별시 구로구 가마산로 000")
+            at.text_input(key=f"pk_bank_{sid}").input("농협")
+            at.text_input(key=f"pk_acct_{sid}").input("000-0000-0000-00")
+            at.text_input(key=f"pk_holder_{sid}").input("홍길동")
+            at.text_input(key=f"pk_proxy_{sid}").input("김대리")
+            at.text_input(key=f"pk_rel_{sid}").input("자녀")
+            at.button(key=f"pk_make_{sid}").click().run()
+            self.assertFalse(at.exception, at.exception)
+
+            zip_data, failed = at.session_state[f"pk_{sid}"]
+            self.assertEqual(failed, [])
+            with zipfile.ZipFile(io.BytesIO(zip_data), "r") as zout:
+                names = zout.namelist()
+                self.assertTrue(any(n.startswith("1_신청준비_") and n.endswith(".pdf") for n in names))
+                self.assertTrue(any(n.startswith("2_기관양식(작성해서 제출)/작성됨_") for n in names))
 
 
 if __name__ == "__main__":
