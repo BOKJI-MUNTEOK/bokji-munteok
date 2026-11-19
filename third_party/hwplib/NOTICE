@@ -1,0 +1,8 @@
+This project uses kr.dogfoot:hwplib for HWP 5.0 form parsing and autofill.
+
+- Artifact: kr.dogfoot:hwplib:1.1.10
+- Source repository: https://github.com/neolord0/hwplib
+- Maven Central URL: https://repo1.maven.org/maven2/kr/dogfoot/hwplib/1.1.10/hwplib-1.1.10.jar
+- SHA-256: fce557a7b4aff0c626c544558e0939459601a008d9378457b6183f7f3ae9d1b9
+- License: Apache License 2.0 (see LICENSE in this directory)
+- Author: Park.sungkyon (neolord0)

@@ -16,7 +16,7 @@ import paperwork
 
 FONTS = Path(__file__).resolve().parent.parent / "assets" / "fonts"
 SELF = "(직접 작성)"
-FORM_WORDS = r"신청.{0,6}서|서식|동의서|위임장|확인서|신고서|양식"
+FORM_WORDS = r"신청.{0,6}서|서식|동의서|위임장|확인서|신고서|양식|청약서"
 MAX_BYTES = 20 * 1024 * 1024  # 이보다 큰 안내 자료는 ZIP에 넣지 않고 주소만 남긴다
 
 

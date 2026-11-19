@@ -2,3 +2,7 @@ streamlit>=1.58
 pandas
 fpdf2
 pymongo>=4.10,<5
+lxml
+pdfplumber
+pypdf
+reportlab
