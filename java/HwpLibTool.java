@@ -12,6 +12,8 @@ import kr.dogfoot.hwplib.object.bodytext.paragraph.text.HWPCharControlChar;
 import kr.dogfoot.hwplib.object.bodytext.paragraph.text.HWPCharNormal;
 import kr.dogfoot.hwplib.object.bodytext.paragraph.text.HWPCharType;
 import kr.dogfoot.hwplib.object.bodytext.paragraph.text.ParaText;
+import kr.dogfoot.hwplib.object.docinfo.CharShape;
+import kr.dogfoot.hwplib.object.docinfo.ParaShape;
 import kr.dogfoot.hwplib.reader.HWPReader;
 import kr.dogfoot.hwplib.writer.HWPWriter;
 
@@ -60,9 +62,21 @@ public class HwpLibTool {
             return "";
         }
         try {
-            String s = p.getNormalString();
-            if (s == null) return "";
-            return s.replace("\r", "").replace("\n", "");
+            ArrayList<HWPChar> chars = p.getText().getCharList();
+            StringBuilder sb = new StringBuilder(chars.size());
+            for (HWPChar ch : chars) {
+                if (ch.getType() == HWPCharType.Normal) {
+                    int code = ((HWPCharNormal) ch).getCode();
+                    if (code > 0 && code != '\r' && code != '\n') {
+                        sb.append((char) code);
+                    }
+                } else if (ch.getType() == HWPCharType.ControlChar) {
+                    if (((HWPCharControlChar) ch).getCode() == 10) {
+                        sb.append('\u2028');
+                    }
+                }
+            }
+            return sb.toString();
         } catch (Exception e) {
             return "";
         }
@@ -119,6 +133,47 @@ public class HwpLibTool {
         return 1000;
     }
 
+    private static int charSpaceHangul(HWPFile hwp, int shapeId) {
+        var csList = hwp.getDocInfo().getCharShapeList();
+        if (shapeId >= 0 && shapeId < csList.size() && csList.get(shapeId).getCharSpaces() != null) {
+            return csList.get(shapeId).getCharSpaces().getHangul();
+        }
+        return 0;
+    }
+
+    private static int charRatioHangul(HWPFile hwp, int shapeId) {
+        var csList = hwp.getDocInfo().getCharShapeList();
+        if (shapeId >= 0 && shapeId < csList.size() && csList.get(shapeId).getRatios() != null) {
+            int r = csList.get(shapeId).getRatios().getHangul();
+            return r > 0 ? r : 100;
+        }
+        return 100;
+    }
+
+    private static String paraAlignName(HWPFile hwp, Paragraph p) {
+        if (p == null || p.getHeader() == null) return "Left";
+        int psId = p.getHeader().getParaShapeId();
+        var psList = hwp.getDocInfo().getParaShapeList();
+        if (psId >= 0 && psId < psList.size()) {
+            ParaShape ps = psList.get(psId);
+            if (ps.getProperty1() != null && ps.getProperty1().getAlignment() != null) {
+                return ps.getProperty1().getAlignment().name();
+            }
+        }
+        return "Left";
+    }
+
+    private static int paraLineSpacePct(HWPFile hwp, Paragraph p) {
+        if (p == null || p.getHeader() == null) return 160;
+        int psId = p.getHeader().getParaShapeId();
+        var psList = hwp.getDocInfo().getParaShapeList();
+        if (psId >= 0 && psId < psList.size()) {
+            int ls = psList.get(psId).getLineSpace();
+            if (ls >= 100 && ls <= 300) return ls;
+        }
+        return 160;
+    }
+
     private static String inspectToJson(HWPFile hwp) {
         var csList = hwp.getDocInfo().getCharShapeList();
         int defaultShapeId = -1;
@@ -161,6 +216,9 @@ public class HwpLibTool {
                   .append(",\"para\":").append(pIdx)
                   .append(",\"char_shape_id\":").append(pShape)
                   .append(",\"font_pt100\":").append(pPt)
+                  .append(",\"char_space\":").append(charSpaceHangul(hwp, pShape))
+                  .append(",\"char_ratio\":").append(charRatioHangul(hwp, pShape))
+                  .append(",\"para_align\":").append(jsonEscape(paraAlignName(hwp, p)))
                   .append(",\"text\":").append(jsonEscape(safeParaString(p))).append('}');
 
                 if (p.getControlList() != null) {
@@ -200,6 +258,9 @@ public class HwpLibTool {
                     var pl = cell.getParagraphList();
                     int cShape = pl.getParagraphCount() > 0 ? paraCharShapeId(pl.getParagraph(0)) : -1;
                     int cPt = fontPt100(hwp, cShape);
+                    int cSp = charSpaceHangul(hwp, cShape);
+                    int cRt = charRatioHangul(hwp, cShape);
+                    int cLs = pl.getParagraphCount() > 0 ? paraLineSpacePct(hwp, pl.getParagraph(0)) : 160;
                     if (!firstCell) sb.append(',');
                     firstCell = false;
                     sb.append("{\"cell_idx\":").append(cellSeq++)
@@ -207,9 +268,28 @@ public class HwpLibTool {
                       .append(",\"col\":").append(lh.getColIndex())
                       .append(",\"row_span\":").append(lh.getRowSpan())
                       .append(",\"col_span\":").append(lh.getColSpan())
+                      .append(",\"width\":").append(lh.getWidth())
+                      .append(",\"height\":").append(lh.getHeight())
+                      .append(",\"margin_left\":").append(lh.getLeftMargin())
+                      .append(",\"margin_right\":").append(lh.getRightMargin())
+                      .append(",\"margin_top\":").append(lh.getTopMargin())
+                      .append(",\"margin_bottom\":").append(lh.getBottomMargin())
                       .append(",\"char_shape_id\":").append(cShape)
                       .append(",\"font_pt100\":").append(cPt)
-                      .append(",\"text\":").append(jsonEscape(cellJoinedText(cell))).append('}');
+                      .append(",\"char_space\":").append(cSp)
+                      .append(",\"char_ratio\":").append(cRt)
+                      .append(",\"line_space_pct\":").append(cLs)
+                      .append(",\"para_aligns\":[");
+                    for (int k = 0; k < pl.getParagraphCount(); k++) {
+                        if (k > 0) sb.append(',');
+                        sb.append(jsonEscape(paraAlignName(hwp, pl.getParagraph(k))));
+                    }
+                    sb.append("],\"para_pt100s\":[");
+                    for (int k = 0; k < pl.getParagraphCount(); k++) {
+                        if (k > 0) sb.append(',');
+                        sb.append(fontPt100(hwp, paraCharShapeId(pl.getParagraph(k))));
+                    }
+                    sb.append("],\"text\":").append(jsonEscape(cellJoinedText(cell))).append('}');
                 }
             }
             sb.append("]}");
@@ -221,6 +301,7 @@ public class HwpLibTool {
     @SuppressWarnings("unchecked")
     private static int applyPlan(HWPFile hwp, Map<String, Object> plan) throws Exception {
         List<ControlTable> tables = collectTables(hwp);
+        Map<String, Integer> derivedCharShapes = new LinkedHashMap<>();
         int applied = 0;
 
         Object ceObj = plan.get("cell_edits");
@@ -247,8 +328,9 @@ public class HwpLibTool {
                 }
                 if (cpIdx < 0 || cpIdx >= plist.getParagraphCount()) continue;
                 Paragraph targetP = plist.getParagraph(cpIdx);
+                int finalShapeId = resolveDerivedCharShapeId(hwp, targetP, overrideShapeId, ed, derivedCharShapes);
                 if (applyParaEdit(targetP, mode, anchor, value)) {
-                    applyCharShapeOverride(hwp, targetP, overrideShapeId);
+                    applyCharShapeOverride(hwp, targetP, finalShapeId);
                     applied++;
                 }
             }
@@ -271,13 +353,60 @@ public class HwpLibTool {
                 Section sec = secs.get(secIdx);
                 if (pIdx < 0 || pIdx >= sec.getParagraphCount()) continue;
                 Paragraph targetP = sec.getParagraph(pIdx);
+                int finalShapeId = resolveDerivedCharShapeId(hwp, targetP, overrideShapeId, ed, derivedCharShapes);
                 if (applyParaEdit(targetP, mode, anchor, value)) {
-                    applyCharShapeOverride(hwp, targetP, overrideShapeId);
+                    applyCharShapeOverride(hwp, targetP, finalShapeId);
                     applied++;
                 }
             }
         }
         return applied;
+    }
+
+    private static int resolveDerivedCharShapeId(
+            HWPFile hwp,
+            Paragraph p,
+            int baseOverrideSid,
+            Map<String, Object> ed,
+            Map<String, Integer> derivedCache
+    ) throws Exception {
+        int fitPt = ed.get("fit_font_pt100") instanceof Number n ? n.intValue() : -1;
+        boolean hasSp = ed.get("fit_char_space") instanceof Number;
+        int fitSp = hasSp ? ((Number) ed.get("fit_char_space")).intValue() : 0;
+        if (fitPt <= 0 && !hasSp) {
+            return baseOverrideSid;
+        }
+        var csList = hwp.getDocInfo().getCharShapeList();
+        if (csList.isEmpty()) {
+            return baseOverrideSid;
+        }
+        int baseSid = baseOverrideSid >= 0 ? baseOverrideSid : paraCharShapeId(p);
+        if (baseSid < 0 || baseSid >= csList.size()) {
+            baseSid = 0;
+        }
+        CharShape orig = csList.get(baseSid);
+        int origPt = orig.getBaseSize();
+        int origSp = orig.getCharSpaces() != null ? orig.getCharSpaces().getHangul() : 0;
+        int targetPt = fitPt > 0 ? Math.max(800, fitPt) : origPt;
+        int targetSp = hasSp ? Math.max(-10, fitSp) : origSp;
+        if (targetPt == origPt && targetSp == origSp) {
+            return baseOverrideSid;
+        }
+        String cacheKey = baseSid + ":" + targetPt + ":" + targetSp;
+        Integer cached = derivedCache.get(cacheKey);
+        if (cached != null) {
+            return cached;
+        }
+        CharShape copy = orig.clone();
+        copy.setBaseSize(targetPt);
+        if (copy.getCharSpaces() != null) {
+            copy.getCharSpaces().setForAll((byte) targetSp);
+        }
+        csList.add(copy);
+        int newId = csList.size() - 1;
+        hwp.getDocInfo().getIDMappings().setCharShapeCount(csList.size());
+        derivedCache.put(cacheKey, newId);
+        return newId;
     }
 
     private static void applyCharShapeOverride(HWPFile hwp, Paragraph p, int overrideShapeId) {
@@ -291,7 +420,7 @@ public class HwpLibTool {
         int newSz = csList.get(overrideShapeId).getBaseSize();
         if (p.getLineSeg() != null && !p.getLineSeg().getLineSegItemList().isEmpty()) {
             for (LineSegItem item : p.getLineSeg().getLineSegItemList()) {
-                if (item.getLineHeight() < newSz) {
+                if (item.getLineHeight() != newSz) {
                     item.setLineHeight(newSz);
                     item.setTextPartHeight(newSz);
                     item.setDistanceBaseLineToLineVerticalPosition((int) (newSz * 0.85));
@@ -446,6 +575,17 @@ public class HwpLibTool {
         }
     }
 
+    private static int findNormalCharAfter(ParaText pt, int startIdx, char target) {
+        ArrayList<HWPChar> chars = pt.getCharList();
+        for (int i = Math.max(0, startIdx); i < chars.size(); i++) {
+            HWPChar ch = chars.get(i);
+            if (ch.getType() == HWPCharType.Normal && ((HWPCharNormal) ch).getCode() == target) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
     private static int findCharIndexOfSubstringEnd(ParaText pt, String sub) {
         StringBuilder sb = new StringBuilder();
         List<Integer> map = new ArrayList<>();
@@ -521,6 +661,7 @@ public class HwpLibTool {
             if (m.find()) {
                 String yr = m.group(1), mo = m.group(2), dy = m.group(3);
                 int idxM = findCharIndexOfSubstringEnd(pt, "월");
+                if (idxM < 0) idxM = findCharIndexOfSubstringEnd(pt, "윌");
                 int idxYEnd = findCharIndexOfSubstringEnd(pt, "년");
                 int idxYStart = findCharIndexOfSubstringStart(pt, "년");
                 if (idxM >= 0 && idxYEnd >= 0 && idxYStart >= 0) {
@@ -550,6 +691,7 @@ public class HwpLibTool {
             if (m.find()) {
                 String yr2 = m.group(1).substring(2), mo = m.group(2), dy = m.group(3);
                 int idxM = findCharIndexOfSubstringEnd(pt, "월");
+                if (idxM < 0) idxM = findCharIndexOfSubstringEnd(pt, "윌");
                 int idxYEnd = findCharIndexOfSubstringEnd(pt, "년");
                 int idx20End = findCharIndexOfSubstringEnd(pt, "20");
                 if (idxM >= 0 && idxYEnd >= 0 && idx20End >= 0) {
@@ -566,6 +708,36 @@ public class HwpLibTool {
                     pt.insertString(idx20End, yr2);
                     trimSlotCharsAfter(pt, idx20End + yr2.length(), displayWidthSpaces(yr2), 1);
                     ok = true;
+                }
+            }
+        } else if ("date_dot".equals(mode)) {
+            Matcher m = Pattern.compile("(\\d{4})년\\s*(\\d{1,2})월\\s*(\\d{1,2})일").matcher(value);
+            if (m.find()) {
+                String yr = m.group(1), mo = m.group(2), dy = m.group(3);
+                String prefix = !anchor.isEmpty() ? anchor : "202";
+                int idxPrefixEnd = findCharIndexOfSubstringEnd(pt, prefix);
+                if (idxPrefixEnd >= 0) {
+                    int idxDot1 = findNormalCharAfter(pt, idxPrefixEnd, '.');
+                    int idxDot2 = idxDot1 >= 0 ? findNormalCharAfter(pt, idxDot1 + 1, '.') : -1;
+                    if (idxDot1 >= 0 && idxDot2 >= 0) {
+                        int posAfter2 = idxDot2 + 1;
+                        int idxDot3 = findNormalCharAfter(pt, posAfter2, '.');
+                        int availMd = measureSlotWidthAfter(pt, posAfter2);
+                        String insD = (idxDot3 >= 0 && availMd < dy.length() + 2) ? dy : (" " + dy);
+                        pt.insertString(posAfter2, insD);
+                        trimSlotCharsAfter(pt, posAfter2 + insD.length(), displayWidthSpaces(insD), idxDot3 >= 0 ? 1 : 0);
+
+                        int posAfter1 = idxDot1 + 1;
+                        int availYm = measureSlotWidthAfter(pt, posAfter1);
+                        String insM = (availYm >= mo.length() + 2) ? (" " + mo) : mo;
+                        pt.insertString(posAfter1, insM);
+                        trimSlotCharsAfter(pt, posAfter1 + insM.length(), displayWidthSpaces(insM), 1);
+
+                        String yrSuf = yr.length() > prefix.length() ? yr.substring(prefix.length()) : yr;
+                        pt.insertString(idxPrefixEnd, yrSuf);
+                        trimSlotCharsAfter(pt, idxPrefixEnd + yrSuf.length(), yrSuf.length(), 1);
+                        ok = true;
+                    }
                 }
             }
         }

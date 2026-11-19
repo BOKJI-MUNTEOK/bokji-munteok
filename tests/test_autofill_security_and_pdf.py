@@ -846,7 +846,167 @@ class TestAutofillSecurityAndEngines(unittest.TestCase):
         self.assertTrue(any(s["reason"] == "excluded_section" for s in plan["report"]["skipped_fields"]))
         # '신고인'이 '고인'으로 오인되어 제외되지 않는지 확인
         self.assertEqual(fm.detect_section_context("신고인(신청인)"), "applicant")
-        self.assertEqual(fm.detect_section_context("사망한 고인 성명"), "excluded")
+        self.assertEqual(fm.detect_section_context("사망한 고인 성명"), "other_person")
+
+    def test_fix_e_other_person_relation_and_family_roster_excluded(self) -> None:
+        doc_dump = {
+            "default_char_shape_id": 0,
+            "default_font_pt100": 1000,
+            "paragraphs": [{"section": 0, "para": 0, "text": ""}],
+            "tables": [
+                {
+                    "section": 0, "para": 0, "control": 0, "row_count": 10, "col_count": 4,
+                    "cells": [
+                        {"cell_idx": 0, "row": 0, "col": 0, "row_span": 2, "col_span": 1, "text": "신청인 (대리 신청인)"},
+                        {"cell_idx": 1, "row": 0, "col": 1, "row_span": 1, "col_span": 1, "text": "성명"},
+                        {"cell_idx": 2, "row": 0, "col": 2, "row_span": 1, "col_span": 1, "text": ""},
+                        {"cell_idx": 3, "row": 1, "col": 1, "row_span": 1, "col_span": 1, "text": "수급권자와의 관계"},
+                        {"cell_idx": 4, "row": 1, "col": 2, "row_span": 1, "col_span": 1, "text": ""},
+                        {"cell_idx": 5, "row": 2, "col": 0, "row_span": 1, "col_span": 1, "text": "출산자"},
+                        {"cell_idx": 6, "row": 2, "col": 1, "row_span": 1, "col_span": 1, "text": "성명"},
+                        {"cell_idx": 7, "row": 2, "col": 2, "row_span": 1, "col_span": 1, "text": ""},
+                        {"cell_idx": 8, "row": 3, "col": 0, "row_span": 1, "col_span": 1, "text": "등록대상자"},
+                        {"cell_idx": 9, "row": 3, "col": 1, "row_span": 1, "col_span": 1, "text": "생년월일"},
+                        {"cell_idx": 10, "row": 3, "col": 2, "row_span": 1, "col_span": 1, "text": ""},
+                        {"cell_idx": 11, "row": 4, "col": 0, "row_span": 3, "col_span": 1, "text": "②가족상황"},
+                        {"cell_idx": 12, "row": 4, "col": 1, "row_span": 1, "col_span": 1, "text": "본인과의 관계"},
+                        {"cell_idx": 13, "row": 4, "col": 2, "row_span": 1, "col_span": 1, "text": "생년월일"},
+                        {"cell_idx": 14, "row": 5, "col": 1, "col_span": 1, "row_span": 1, "text": ""},
+                        {"cell_idx": 15, "row": 5, "col": 2, "row_span": 1, "col_span": 1, "text": ""},
+                        {"cell_idx": 16, "row": 6, "col": 1, "col_span": 1, "row_span": 1, "text": ""},
+                        {"cell_idx": 17, "row": 6, "col": 2, "row_span": 1, "col_span": 1, "text": ""},
+                        {"cell_idx": 18, "row": 7, "col": 0, "row_span": 1, "col_span": 1, "text": "③지급계좌"},
+                        {"cell_idx": 19, "row": 7, "col": 1, "row_span": 1, "col_span": 1, "text": "예금주"},
+                        {"cell_idx": 20, "row": 7, "col": 2, "row_span": 1, "col_span": 1, "text": ""},
+                        # 2560_1 패턴: (전화번호:  ) 아래에 관계 라벨이 있어도 전화번호가 내려오지 않아야 함
+                        {"cell_idx": 21, "row": 8, "col": 1, "row_span": 1, "col_span": 1, "text": "주 소"},
+                        {"cell_idx": 22, "row": 8, "col": 2, "row_span": 1, "col_span": 2, "text": "                    (전화번호:        )", "width": 32633, "height": 3249},
+                        {"cell_idx": 23, "row": 9, "col": 1, "row_span": 1, "col_span": 1, "text": "수급권자와의 관계"},
+                        {"cell_idx": 24, "row": 9, "col": 2, "row_span": 1, "col_span": 2, "text": ""},
+                    ],
+                },
+            ],
+        }
+        plan = fill_hwp_plan.plan_hwp_fills(doc_dump)
+        filled_locs = {(e["row"], e["col"]): (e["field_key"], e["value"]) for e in plan["cell_edits"]}
+        self.assertEqual(filled_locs[(0, 2)], ("applicant.name", "홍길동"))
+        self.assertNotIn((1, 2), filled_locs)
+        self.assertNotIn((2, 2), filled_locs)
+        self.assertNotIn((3, 2), filled_locs)
+        self.assertNotIn((5, 2), filled_locs)
+        self.assertEqual(filled_locs[(7, 2)], ("account.holder", "홍길동"))
+        self.assertNotIn((9, 2), filled_locs)
+        self.assertEqual(fm.match_label("관계", section="proxy").action, "fill")
+        self.assertEqual(fm.match_label("수급권자와의 관계", section="applicant").reason, "ambiguous_relation_section")
+        self.assertTrue(any(s["reason"] == "other_person" for s in plan["report"]["skipped_fields"]))
+
+    def test_fix_f_ledger_and_approval_table_excluded(self) -> None:
+        sec = (
+            b"<hs:sec xmlns:hs='http://www.hancom.co.kr/hwpml/2011/section' "
+            b"xmlns:hp='http://www.hancom.co.kr/hwpml/2011/paragraph'>"
+            b"<hp:p><hp:run><hp:t>\xec\xb6\x9c\xec\x82\xb0\xec\x84\x9c\xeb\xb9\x84\xec\x8a\xa4 \xed\x86\xb5\xed\x95\xa9\xec\xb2\x98\xeb\xa6\xac \xec\x8b\xa0\xec\xb2\xad \xec\xa0\x91\xec\x88\x98\xeb\x8c\x80\xec\x9e\xa5</hp:t></hp:run></hp:p>"
+            b"<hp:tbl>"
+            b"<hp:tr>"
+            b"<hp:tc><hp:cellAddr colAddr='0' rowAddr='0'/><hp:cellSpan colSpan='1' rowSpan='1'/><hp:subList><hp:p><hp:run><hp:t>\xec\x84\xb1\xeb\xaa\x85</hp:t></hp:run></hp:p></hp:subList></hp:tc>"
+            b"<hp:tc><hp:cellAddr colAddr='1' rowAddr='0'/><hp:cellSpan colSpan='1' rowSpan='1'/><hp:subList><hp:p><hp:run><hp:t>\xea\xb2\xb0\xec\x9e\xac</hp:t></hp:run></hp:p></hp:subList></hp:tc>"
+            b"</hp:tr>"
+            b"<hp:tr>"
+            b"<hp:tc><hp:cellAddr colAddr='0' rowAddr='1'/><hp:cellSpan colSpan='1' rowSpan='1'/><hp:subList><hp:p><hp:run><hp:t></hp:t></hp:run></hp:p></hp:subList></hp:tc>"
+            b"<hp:tc><hp:cellAddr colAddr='1' rowAddr='1'/><hp:cellSpan colSpan='1' rowSpan='1'/><hp:subList><hp:p><hp:run><hp:t></hp:t></hp:run></hp:p></hp:subList></hp:tc>"
+            b"</hp:tr>"
+            b"</hp:tbl>"
+            b"<hp:p><hp:run><hp:t>\xeb\xb3\xb5\xec\xa7\x80\xea\xb8\x89\xec\x97\xac \xec\x8b\xa0\xec\xb2\xad\xec\x84\x9c</hp:t></hp:run></hp:p>"
+            b"<hp:tbl>"
+            b"<hp:tr><hp:tc><hp:cellAddr colAddr='0' rowAddr='0'/><hp:cellSpan colSpan='1' rowSpan='1'/><hp:subList><hp:p><hp:run><hp:t>\xec\x8b\xa0\xec\xb2\xad\xec\x9d\xb8</hp:t></hp:run></hp:p></hp:subList></hp:tc>"
+            b"<hp:tc><hp:cellAddr colAddr='1' rowAddr='0'/><hp:cellSpan colSpan='1' rowSpan='1'/><hp:subList><hp:p><hp:run><hp:t>\xec\x84\xb1\xeb\xaa\x85</hp:t></hp:run></hp:p></hp:subList></hp:tc>"
+            b"<hp:tc><hp:cellAddr colAddr='2' rowAddr='0'/><hp:cellSpan colSpan='1' rowSpan='1'/><hp:subList><hp:p><hp:run><hp:t></hp:t></hp:run></hp:p></hp:subList></hp:tc></hp:tr>"
+            b"</hp:tbl>"
+            b"</hs:sec>"
+        )
+        out_bytes, rep = fill_hwpx.fill_hwpx_bytes(_make_minimal_hwpx(sec))
+        self.assertEqual(rep["filled_count"], 1)
+        self.assertEqual(rep["filled_fields"][0]["label"], "성명")
+        self.assertTrue(fm.is_ledger_or_approval_table(["결재", "담당"]))
+
+    def test_fix_g_cell_width_fit_bounds_and_no_room(self) -> None:
+        header = (
+            b"<hh:head xmlns:hh='http://www.hancom.co.kr/hwpml/2011/head'>"
+            b"<hh:charProperties itemCnt='1'>"
+            b"<hh:charPr id='0' height='1200'><hh:spacing hangul='0' latin='0' hanja='0' japanese='0' other='0' symbol='0' user='0'/></hh:charPr>"
+            b"</hh:charProperties>"
+            b"<hh:paraProperties itemCnt='1'>"
+            b"<hh:paraPr id='0'><hh:align horizontal='LEFT' vertical='BASELINE'/><hh:lineSpacing type='PERCENT' value='130' unit='HWPUNIT'/></hh:paraPr>"
+            b"</hh:paraProperties>"
+            b"</hh:head>"
+        )
+        sec = (
+            b"<hs:sec xmlns:hs='http://www.hancom.co.kr/hwpml/2011/section' "
+            b"xmlns:hp='http://www.hancom.co.kr/hwpml/2011/paragraph'>"
+            b"<hp:tbl>"
+            b"<hp:tr>"
+            b"<hp:tc><hp:cellAddr colAddr='0' rowAddr='0'/><hp:cellSpan colSpan='1' rowSpan='1'/><hp:cellSz width='5000' height='2833'/><hp:cellMargin left='142' right='142' top='142' bottom='142'/><hp:subList><hp:p paraPrIDRef='0'><hp:run charPrIDRef='0'><hp:t>\xec\xa3\xbc\xec\x86\x8c</hp:t></hp:run></hp:p></hp:subList></hp:tc>"
+            b"<hp:tc><hp:cellAddr colAddr='1' rowAddr='0'/><hp:cellSpan colSpan='1' rowSpan='1'/><hp:cellSz width='11055' height='2833'/><hp:cellMargin left='142' right='142' top='142' bottom='142'/><hp:subList><hp:p paraPrIDRef='0'><hp:run charPrIDRef='0'><hp:t></hp:t></hp:run></hp:p></hp:subList></hp:tc>"
+            b"<hp:tc><hp:cellAddr colAddr='2' rowAddr='0'/><hp:cellSpan colSpan='1' rowSpan='1'/><hp:cellSz width='5000' height='3546'/><hp:cellMargin left='141' right='141' top='141' bottom='141'/><hp:subList><hp:p paraPrIDRef='0'><hp:run charPrIDRef='0'><hp:t>\xea\xb3\x84\xec\xa2\x8c\xeb\xb2\x88\xed\x98\xb8</hp:t></hp:run></hp:p></hp:subList></hp:tc>"
+            b"<hp:tc><hp:cellAddr colAddr='3' rowAddr='0'/><hp:cellSpan colSpan='1' rowSpan='1'/><hp:cellSz width='5914' height='3546'/><hp:cellMargin left='141' right='141' top='141' bottom='141'/><hp:subList><hp:p paraPrIDRef='0'><hp:run charPrIDRef='0'><hp:t></hp:t></hp:run></hp:p></hp:subList></hp:tc>"
+            b"</hp:tr>"
+            b"</hp:tbl>"
+            b"</hs:sec>"
+        )
+        out_bytes, rep = fill_hwpx.fill_hwpx_bytes(_make_minimal_hwpx(sec, {"Contents/header.xml": header}))
+        self.assertEqual([f["field_key"] for f in rep["filled_fields"]], ["applicant.address"])
+        self.assertTrue(any(s["label"] == "계좌번호" and s["reason"] == "no_room" for s in rep["skipped_fields"]))
+        with zipfile.ZipFile(io.BytesIO(out_bytes)) as zf:
+            hdr_out = zf.read("Contents/header.xml").decode("utf-8")
+            self.assertIn("itemCnt=\"2\"", hdr_out)
+            self.assertIn("height=\"900\"", hdr_out)
+        # 8pt·자간 -10% 미만으로는 줄이지 않음
+        ok_narrow, fit_h, fit_sp, _ = fm.fit_text_to_cell("000-0000-0000-00", 5914, 3546, base_pt100=1200, allow_wrap=False)
+        self.assertFalse(ok_narrow)
+        self.assertGreaterEqual(fit_h, 800)
+        self.assertGreaterEqual(fit_sp, -10)
+
+    def test_fix_h_sublabels_norm_dates_and_inline_colon_labels(self) -> None:
+        # 1) 정규화 + 자택/휴대폰 하위 라벨 + '년 윌 일' + 가운데 정렬 + 4167_2 인라인 콜론 라벨
+        self.assertEqual(fm.match_label("금  융\n기 관 명").field_key, "account.bank")
+        self.assertEqual(fm.match_label("계좌 번호").field_key, "account.number")
+        self.assertEqual(fm.match_label("H․P").field_key, "applicant.phone")
+        doc_dump = {
+            "default_char_shape_id": 0,
+            "default_font_pt100": 1000,
+            "paragraphs": [{"section": 0, "para": 0, "para_align": "Left", "font_pt100": 1000, "text": ""}],
+            "tables": [
+                {
+                    "section": 0, "para": 0, "control": 0, "row_count": 3, "col_count": 2,
+                    "cells": [
+                        {"cell_idx": 0, "row": 0, "col": 0, "row_span": 1, "col_span": 1, "text": "연 락 처", "width": 8000, "height": 2000},
+                        {"cell_idx": 1, "row": 0, "col": 1, "row_span": 1, "col_span": 1, "text": "자택 :\n휴대폰 :", "width": 16000, "height": 3600, "para_pt100s": [1000, 1000]},
+                        {"cell_idx": 2, "row": 1, "col": 0, "row_span": 1, "col_span": 2, "text": "위와 같이 신청합니다.\n년 월 일\n년    윌    일", "width": 45000, "height": 6000, "para_aligns": ["Left", "Center", "Center"], "para_pt100s": [1000, 1000, 1000]},
+                        {"cell_idx": 3, "row": 2, "col": 0, "row_span": 1, "col_span": 2, "text": "신청인  주 소 :\u2028성 명 :                  \U000f012b\u2028(지급대상자와의 관계 :        )", "width": 45000, "height": 4000, "para_aligns": ["Left"], "para_pt100s": [1000]},
+                    ],
+                },
+            ],
+        }
+        plan = fill_hwp_plan.plan_hwp_fills(doc_dump)
+        labels_filled = [(e["mode"], e.get("anchor", ""), e["field_key"]) for e in plan["cell_edits"]]
+        self.assertIn(("append", "", "applicant.phone"), labels_filled)
+        self.assertEqual(sum(1 for e in plan["cell_edits"] if e["field_key"] == "apply_date"), 2)
+        self.assertIn(("after_anchor", "주 소 :", "applicant.address"), labels_filled)
+        self.assertIn(("after_anchor", "성 명 :", "applicant.name"), labels_filled)
+        self.assertNotIn("proxy.relation", [e["field_key"] for e in plan["cell_edits"]])
+        # 2) HWPX '202    .     .' 점 날짜 기입
+        sec_dot = (
+            b"<hs:sec xmlns:hs='http://www.hancom.co.kr/hwpml/2011/section' "
+            b"xmlns:hp='http://www.hancom.co.kr/hwpml/2011/paragraph'>"
+            b"<hp:p><hp:run><hp:t>\xec\x8b\xa0\xec\xb2\xad\xed\x95\xa9\xeb\x8b\x88\xeb\x8b\xa4.</hp:t></hp:run></hp:p>"
+            b"<hp:p><hp:run><hp:t>                         202    .     .</hp:t></hp:run></hp:p>"
+            b"</hs:sec>"
+        )
+        out_dot, rep_dot = fill_hwpx.fill_hwpx_bytes(_make_minimal_hwpx(sec_dot), profile=fm.default_profile(fill_hwpx.fm.date(2026, 11, 19) if hasattr(fill_hwpx.fm, "date") else None))
+        self.assertEqual(rep_dot["filled_count"], 1)
+        with zipfile.ZipFile(io.BytesIO(out_dot)) as zf:
+            sec_txt = zf.read("Contents/section0.xml").decode("utf-8")
+            self.assertNotIn("202    .     .", sec_txt)
+            self.assertIn(".", sec_txt)
 
 
 if __name__ == "__main__":

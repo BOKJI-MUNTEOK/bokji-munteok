@@ -46,6 +46,12 @@ def _is_ordinance_page(text: str) -> bool:
     return has_articles and not has_form_marker
 
 
+def _is_ledger_page(text: str) -> bool:
+    top_lines = " ".join((text or "").splitlines()[:5])
+    top_ns = re.sub(r"\s+", "", top_lines)
+    return bool(fm.LEDGER_TITLE_RE.search(top_lines) or fm.LEDGER_TITLE_RE.search(top_ns))
+
+
 def _add_rect_edges(
     x0: float,
     top: float,
@@ -585,6 +591,13 @@ def fill_pdf_bytes(
             page_text = page.extract_text() or ""
             if not page_text.strip() or _is_ordinance_page(page_text):
                 continue
+            if _is_ledger_page(page_text):
+                report["skipped_fields"].append({
+                    "label": (page_text.splitlines()[0] if page_text.splitlines() else "")[:40],
+                    "location": f"p{p_no}",
+                    "reason": "excluded_section",
+                })
+                continue
 
             h_lines, v_lines = _extract_lines(page)
             if len(h_lines) < 3 and not re.search(r"신청서|신고서|동의서|신청인", page_text):
@@ -638,6 +651,16 @@ def fill_pdf_bytes(
 
             for r_words in visual_rows:
                 yc = sum((w["top"] + w["bottom"]) / 2 for w in r_words) / len(r_words)
+                row_sec = section_at_y(yc)
+                if row_sec in ("excluded", "other_person"):
+                    row_s_txt = " ".join(w["text"] for w in r_words).strip()
+                    if re.search(r"년\s*월\s*일|\(서명", row_s_txt):
+                        report["skipped_fields"].append({
+                            "label": row_s_txt[:30],
+                            "location": f"p{p_no} y={yc:.1f}",
+                            "reason": "other_person" if row_sec == "other_person" else "excluded_section",
+                        })
+                    continue
 
                 for seg in _segment_row_by_vlines(r_words, v_lines, max_gap=70.0):
                     seg_txt = " ".join(w["text"] for w in seg).strip()
