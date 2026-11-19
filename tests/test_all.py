@@ -50,7 +50,10 @@ class TestScore(unittest.TestCase):
         e = self.ext(online=False, visit_required=True, agencies=["신청", "조사", "결정"],
                      conditions=[{"type": "x", "text": ""}] * 5)
         r = score.score(e, {"points": 0})
-        self.assertTrue(r["reason"].startswith("방문만 가능, 조건 5개, 기관 3단계, 서류 정보 없음"))
+        self.assertTrue(r["reason"].startswith("방문만 가능, 조건 5개, 기관 3단계, 서류 정보 없음이라서"))
+        hard = score.score(self.ext(documents=["a"]), {"points": 2})["reason"]
+        self.assertIn("안내문 어려움이라서", hard)
+        self.assertRegex(score.score(self.ext(documents=["a", "b"]), {"points": 0})["reason"], r"서류 2개라서 \d+점$")
 
 
 class TestRules(unittest.TestCase):
