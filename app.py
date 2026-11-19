@@ -83,6 +83,7 @@ st.markdown("""
 .st-key-quick button{min-height:44px;font-weight:600;background:var(--bm-surface,#fff);justify-content:flex-start}
 .st-key-quick button[data-testid=stBaseButton-primary]{background:var(--bm-action,#256EF4);color:var(--bm-on-action,#fff)}
 .st-key-quick button:hover{border-color:var(--bm-accent,#256EF4);color:var(--bm-accent,#256EF4)}
+.st-key-quick button[data-testid=stBaseButton-primary]:hover{color:var(--bm-on-action,#fff)}
 h2,h3{color:var(--bm-heading,#063A74)}
 .lead{font-size:1.12rem;margin:-6px 0 4px 0}
 .score{font-size:2.8rem;font-weight:700;line-height:1}
