@@ -185,14 +185,14 @@ def sync_status(state):
     for source, name in (("central", "중앙부처"), ("local", "지자체")):
         row = state["sources"][source]
         st.caption(f"{name} 분석 저장 {row['ready']:,}/{row['total']:,}건")
-    st.caption("매일 새벽 4시(한국시간)에 자동 갱신합니다. 저장된 자료를 표시하고 있어요.")
+    st.caption("매일 00·06·12·18시(한국시간)에 자동 갱신합니다. 저장된 자료를 표시하고 있어요.")
 
 
 if CATALOG.get("sync"):
     with st.sidebar:
         sync_status(CATALOG["sync"])
 if not SV:
-    st.info("공식 복지서비스는 매일 새벽 4시(한국시간)에 자동 수집합니다. 첫 저장 완료 후 새로고침해 주세요.")
+    st.info("공식 복지서비스는 매일 00·06·12·18시(한국시간)에 자동 수집합니다. 첫 저장 완료 후 새로고침해 주세요.")
     st.stop()
 for warning in CATALOG["warnings"]:
     st.warning(warning)
