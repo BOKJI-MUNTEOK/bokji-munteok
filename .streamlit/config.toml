@@ -2,18 +2,43 @@
 gatherUsageStats = false
 
 [theme]
-base = "light"
 # 공공 서비스 느낌: 정부 디자인 시스템(KRDS) 기본 파랑 + 흰 바탕, 공공기관용 Pretendard GOV 글꼴
 primaryColor = "#256EF4"
+showWidgetBorder = true
+baseRadius = "0.5rem"
+font = "Pretendard GOV Variable:https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-gov-dynamic-subset.min.css"
+# 두 배경에서 구분되는 공통 차트 색. Streamlit 1.58도 이 위치를 지원한다.
+chartCategoricalColors = ["#256EF4", "#6FA8FF", "#D9822B", "#2BA36B", "#8A94A6", "#B18AE0"]
+
+# 두 팔레트를 함께 정의하면 시스템 설정·라이트·다크 선택에 맞춰
+# 입력창, 팝업, 표, 차트도 Streamlit이 한 번에 바꾼다.
+[theme.light]
 backgroundColor = "#FFFFFF"
 secondaryBackgroundColor = "#F4F5F6"
 textColor = "#1E2124"
 borderColor = "#DDE1E6"
-showWidgetBorder = true
-baseRadius = "0.5rem"
-font = "Pretendard GOV Variable:https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-gov-dynamic-subset.min.css"
-chartCategoricalColors = ["#256EF4", "#063A74", "#F5A623", "#6FA8FF", "#8A94A6", "#2BA36B"]
+
+[theme.light.sidebar]
+backgroundColor = "#F4F7FC"
+secondaryBackgroundColor = "#FFFFFF"
+
+[theme.dark]
+backgroundColor = "#111923"
+secondaryBackgroundColor = "#1B283B"
+textColor = "#E7EDF6"
+borderColor = "#35445A"
+linkColor = "#8DB5FF"
+dataframeBorderColor = "#35445A"
+dataframeHeaderBackgroundColor = "#223044"
+codeBackgroundColor = "#182230"
+codeTextColor = "#C6D9F7"
+
+[theme.dark.sidebar]
+backgroundColor = "#182230"
+secondaryBackgroundColor = "#223044"
+textColor = "#E7EDF6"
+borderColor = "#35445A"
 
 [client]
-# 시연 화면에서 Deploy 버튼·개발 메뉴를 숨긴다
-toolbarMode = "minimal"
+# 기본 테마 메뉴를 표시하고 개발자용 실행·캐시 메뉴는 숨긴다.
+toolbarMode = "viewer"
