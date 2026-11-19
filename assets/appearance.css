@@ -35,8 +35,9 @@
 
 /* 톱니를 옮긴 뒤 비어 있는 헤더가 본문을 가리지 않게 한다. */
 [data-testid="stHeader"]:not(:has([data-testid="stHeaderLogo"],[data-testid="stExpandSidebarButton"])) {
-  height:0; min-height:0; background:transparent; pointer-events:none;
+  background:transparent; pointer-events:none;
 }
+[data-testid="stStatusWidget"] { pointer-events:auto; }
 /* 사이드바를 접었을 때는 로고·열기 버튼 아래에 본문을 둔다. */
 :root:has([data-testid="stHeader"] :is([data-testid="stHeaderLogo"],[data-testid="stExpandSidebarButton"])) [data-testid="stMainBlockContainer"] {
   padding-top:4.75rem;
