@@ -804,9 +804,7 @@ def analysis():
             with a.container(border=True):
                 st.markdown("**정답표와 비교 (일치율 %)**")
                 if gold:
-                    mix = evaluate.gold_mix()
-                    st.caption(f"현재 조회 자료와 원문이 같은 정답표 {len(gold)}건만 비교합니다. 기존 정답표 구성: "
-                               f"사람 검수 {mix['사람 검수']}건 · AI 재검토 {mix['AI 재검토']}건 (기준: eval/README.md)")
+                    st.caption(f"현재 조회 자료와 원문이 같은 정답표 {len(gold)}건만 비교합니다. (기준: eval/README.md)")
                     r_cmp, a_cmp = evaluate.compare(rule_sum, gold), evaluate.compare(ai_sum, gold)
                     st.dataframe(pd.DataFrame({"항목": [evaluate.LABELS[f] for f in evaluate.FIELDS],
                                                "기준표(규칙)": [r_cmp[f] for f in evaluate.FIELDS],

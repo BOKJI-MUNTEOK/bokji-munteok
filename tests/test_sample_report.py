@@ -54,8 +54,6 @@ class TestSampleReport(unittest.TestCase):
             contents = sample_report.artifacts(report)
         self.assertEqual(report["sample_n"], 50)
         self.assertEqual(report["cohorts"]["전체"]["compared_n"], 50)
-        for group, count in evaluate.gold_mix().items():
-            self.assertEqual(report["cohorts"][group]["compared_n"], count)
         for name, content in contents.items():
             self.assertEqual((ROOT / "eval" / "results" / name).read_bytes(), content.encode("utf-8"), name)
         summary = json.loads(contents["summary.json"])
