@@ -7,8 +7,8 @@ primaryColor = "#256EF4"
 showWidgetBorder = true
 baseRadius = "0.5rem"
 font = "Pretendard GOV Variable:https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-gov-dynamic-subset.min.css"
-# 두 배경에서 구분되는 공통 차트 색. Streamlit 1.58도 이 위치를 지원한다.
-chartCategoricalColors = ["#256EF4", "#6FA8FF", "#D9822B", "#2BA36B", "#8A94A6", "#B18AE0"]
+# 기존 차트 색상을 유지한다.
+chartCategoricalColors = ["#256EF4", "#063A74", "#F5A623", "#6FA8FF", "#8A94A6", "#2BA36B"]
 
 # 두 팔레트를 함께 정의하면 시스템 설정·라이트·다크 선택에 맞춰
 # 입력창, 팝업, 표, 차트도 Streamlit이 한 번에 바꾼다.
