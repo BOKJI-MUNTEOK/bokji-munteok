@@ -8,7 +8,7 @@
 | --- | --- | --- |
 | 사용자 화면 | Streamlit 홈·복지 찾기·상담·서비스 검색·분석, 원문·신청 준비 꾸러미 | `app.py`, `src/packet.py`, #12·#13·#23 |
 | 전체 데이터 연동 | 중앙·지자체 전체 목록 조회, 상세 수집, 상세 미수집 서비스의 점수 제외 | #24 |
-| 저장·자동 갱신 | MongoDB 저장, 추가·변경·삭제 반영, 호출 한도 공유, 중단 후 이어받기, 하루 네 번 예약 실행 | #25·#27, `src/welfare_sync.py` |
+| 저장·자동 갱신 | MongoDB 저장, 추가·변경·삭제 반영, 호출 한도 공유, 중단 후 이어받기, 매일 새벽 4시 예약 실행 | #25·#27, `src/welfare_sync.py` |
 | 운영 성능 | 서울 서버, 캐시, 필요한 영역·분석 탭만 처리 | #28 |
 | 배포 | Vercel 자동 배포. 11/18 확인 시 홈페이지와 `/_stcore/health` 모두 HTTP 200 | [운영 서비스](https://bokji-munteok.vercel.app/) |
 | 실행 기록 | 최근 수집 성공 및 #28 운영 배포 성공 | [수집 실행](https://github.com/BOKJI-MUNTEOK/bokji-munteok/actions/runs/44292900461), [배포 실행](https://github.com/BOKJI-MUNTEOK/bokji-munteok/actions/runs/44036920735) |

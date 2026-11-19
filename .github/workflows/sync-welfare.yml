@@ -2,8 +2,8 @@ name: Welfare Data Sync
 
 on:
   schedule:
-    # UTC 15/21/03/09시 = 한국시간 00/06/12/18시
-    - cron: '0 3,9,15,21 * * *'
+    # UTC 19시 = 한국시간 04시. 호출 한도가 자정에 초기화된 뒤 이용이 적은 새벽에 하루 한 번 실행한다.
+    - cron: '0 19 * * *'
   workflow_dispatch:
 
 permissions:

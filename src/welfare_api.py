@@ -162,5 +162,5 @@ class WelfareAPI:
         if service is None:
             raise APIError("공식 목록에서 삭제된 서비스입니다.")
         if not service.get("detail_loaded"):
-            raise APIError("이 서비스의 상세는 자동 수집 대기 중입니다. 매일 00·06·12·18시(한국시간) 예약 갱신에서 수집하며 저장 후 신청 안내와 점수가 표시됩니다.")
+            raise APIError("이 서비스의 상세는 자동 수집 대기 중입니다. 매일 새벽 4시(한국시간) 예약 갱신에서 수집하며 저장 후 신청 안내와 점수가 표시됩니다.")
         return service

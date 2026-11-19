@@ -73,7 +73,7 @@ class TestLiveCatalogApp(unittest.TestCase):
         at = AppTest.from_file(str(ROOT / "app.py"), default_timeout=30).run()
         self.assertFalse(at.exception, at.exception)
         self.assertTrue(any("10/73건" in c.value for c in at.caption))
-        self.assertTrue(any("00·06·12·18시" in c.value for c in at.caption))
+        self.assertTrue(any("새벽 4시" in c.value for c in at.caption))
         self.api.refresh_status.assert_not_called()
         self.api.start_refresh.assert_not_called()
 
