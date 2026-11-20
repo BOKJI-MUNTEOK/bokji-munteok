@@ -228,7 +228,7 @@ Dockerfile 없이도 동작하게 맞춰 두었습니다.
    HWPLIB_AUTO_SETUP = "1"
    MONGODB_URI = "..."
    MONGODB_DATABASE = "bokji_munteok"
-   # LLM_API_KEY는 넣지 않아도 됩니다. 없으면 규칙 상담·공식 안내 원문·기본 서류 안내로 동작합니다.
+   LLM_API_KEY = "..."     # 선택: AI 상담·쉬운 설명·서류 안내. 없으면 규칙 상담·공식 안내 원문·기본 서류 안내
    JUSO_API_KEY = "..."    # 도로명주소 검색 API 승인키 (선택)
    ```
 
