@@ -45,7 +45,7 @@ def mongo_client(uri):
 
 
 def initial_source():
-    return dict(generation="", previous_generation="", catalog_day="", catalog_slot="", catalog_at=0,
+    return dict(generation="", previous_generation="", catalog_day="", catalog_slot="", catalog_at=0, catalog_checked_at=0,
                 run_day="", status="pending", retry_at=0, note="", added=0, changed=0, removed=0)
 
 
@@ -126,25 +126,34 @@ class WelfareStore:
             raise StoreError("목록의 서비스 식별 정보가 올바르지 않습니다.")
         changes = dict(added=len(new.keys() - old.keys()), removed=len(old.keys() - new.keys()),
                        changed=sum(old[sid] != new[sid] for sid in old.keys() & new.keys()))
-        generation, now = uuid.uuid4().hex, time.time()
-        for offset in range(0, len(items), 500):
-            self.renew(owner)
-            self.db.catalog.insert_many([
-                {"_id": f"{generation}:{s['servId']}", "source": source, "serv_id": s["servId"],
-                 "generation": generation, "detail_ref": detail_id(s), "created_at": now, "item": s}
-                for s in items[offset:offset + 500]])
-        values = dict(generation=generation, previous_generation=state["generation"], catalog_day=today(),
-                      catalog_slot=slot or sync_slot(),
-                      catalog_at=now, run_day=today(), status="collecting", note="", retry_at=0, **changes)
+        unchanged = bool(state["generation"]) and old == new
+        now = time.time()
+        values = {**state, "catalog_day": today(), "catalog_slot": slot or sync_slot(),
+                  "catalog_checked_at": now, "run_day": today(), "status": "collecting",
+                  "note": "", "retry_at": 0, **changes}
+        if not unchanged:
+            generation = uuid.uuid4().hex
+            for offset in range(0, len(items), 500):
+                self.renew(owner)
+                self.db.catalog.insert_many([
+                    {"_id": f"{generation}:{s['servId']}", "source": source, "serv_id": s["servId"],
+                     "generation": generation, "detail_ref": detail_id(s), "created_at": now, "item": s}
+                    for s in items[offset:offset + 500]])
+            values.update(generation=generation, previous_generation=state["generation"], catalog_at=now)
+        # 같은 목록은 확인 시각만 갱신한다. 자료 버전과 화면의 분석 캐시는 그대로 둔다.
+        update = {"$set": {f"sources.{source}": values}}
+        if not unchanged:
+            update["$inc"] = {"revision": 1}
         result = self.db.meta.update_one(
             {"_id": "sync", "owner": owner, "expires": {"$gt": time.time()}},
-            {"$set": {f"sources.{source}": values}, "$inc": {"revision": 1}})
+            update)
         if result.matched_count != 1:
             raise StoreError("갱신 잠금이 만료되어 기존 목록을 유지합니다.")
         # 현재/직전 세대와 최근 이틀 자료를 유지하고 중단된 미공개 세대도 정리한다.
-        self.db.catalog.delete_many({"source": source, "generation": {"$nin": [generation, state["generation"]]},
+        self.db.catalog.delete_many({"source": source, "generation": {"$nin": [values["generation"], values["previous_generation"]]},
                                      "created_at": {"$lt": now - 2 * 86400}})
-        self.catalog_cache = {generation: items}
+        if not unchanged:
+            self.catalog_cache = {values["generation"]: items}
         return changes
 
     def _ready(self, source):
@@ -164,10 +173,12 @@ class WelfareStore:
             "source": item["api_source"], "until": time.time() + 3600}}, upsert=True)
 
     def save_detail(self, item, detail):
+        from analysis_cache import FEATURE_VERSION, analysis_hash
         import rules
         import score
         ext, read = rules.extract(detail), score.readability(detail)
-        analysis = {"ext": ext, "read": read, **score.score(ext, read), "weights": score.DEFAULT_WEIGHTS}
+        analysis = {"ext": ext, "read": read, **score.score(ext, read), "weights": score.DEFAULT_WEIGHTS,
+                    "feature_version": FEATURE_VERSION, "source_hash": analysis_hash(detail)}
         # 목록 해시별 저장: 늦게 끝난 응답이 새 상세를 덮어쓰지 않는다.
         result = self.db.details.update_one({"_id": detail_id(item)}, {"$setOnInsert": {
             "source": item["api_source"], "serv_id": item["servId"], "list_hash": item["list_hash"],
@@ -229,6 +240,16 @@ class WelfareStore:
             raise StoreError("저장된 복지 데이터가 아직 없어요. 첫 예약 갱신이 완료된 뒤 다시 확인해 주세요.")
         return meta["revision"]
 
+    def metadata(self):
+        """웹에 필요한 자료 버전과 공개 갱신 상태만 읽는다. 잠금 정보는 내보내지 않는다."""
+        meta = self.db.meta.find_one({"_id": "sync"}, {"revision": 1, "sources": 1})
+        if meta is None:
+            raise StoreError("저장된 복지 데이터가 아직 없어요. 첫 예약 갱신이 완료된 뒤 다시 확인해 주세요.")
+        fields = initial_source()
+        return {"revision": meta["revision"], "sources": {
+            source: {k: v for k, v in state.items() if k in fields}
+            for source, state in meta["sources"].items() if source in LIMITS}}
+
     @staticmethod
     def _service(item, detail):
         if not detail:
@@ -244,19 +265,34 @@ class WelfareStore:
         row = self.db.catalog.find_one({"source": source, "generation": state["generation"], "serv_id": sid})
         return self._service(row["item"], self.db.details.find_one({"_id": detail_id(row["item"])})) if row else None
 
-    def snapshot(self):
-        meta = self.db.meta.find_one({"_id": "sync"})
-        services, counts = [], {}
-        progress = {"revision": meta["revision"], "sources": {}}
-        for source, state in meta["sources"].items():
-            items = self._catalog(source, state)
-            refs = [detail_id(s) for s in items]
-            details = {d["_id"]: d for d in self.db.details.find({"_id": {"$in": refs}})}
-            services.extend(self._service(s, details.get(detail_id(s))) for s in items)
-            counts[source] = len(items)
-            progress["sources"][source] = {**state, "total": len(items),
-                                           "ready": sum(detail_id(s) in details for s in items)}
-        # 읽은 자료로 집계해 별도의 전체 조인·호출 한도 조회를 하지 않는다.
+    def snapshot(self, previous=None, meta=None):
+        """이전 자료와 같은 상세는 재사용하고 추가·변경·미수집 상세만 읽는다."""
+        meta = self.metadata() if meta is None else meta
+        same_revision = previous is not None and previous["sync"]["revision"] == meta["revision"]
+        if same_revision:
+            services, counts = previous["services"], previous["counts"]
+            ready = {s: row["ready"] for s, row in previous["sync"]["sources"].items()}
+        else:
+            services, counts, ready = [], {}, {}
+            old_services = previous["services"] if previous is not None else []
+            stored = {detail_id(s): s for s in old_services if s.get("detail_loaded")}
+            old_states = previous["sync"]["sources"] if previous is not None else {}
+            for source, state in meta["sources"].items():
+                if source in old_states and state["generation"] == old_states[source]["generation"]:
+                    items = [s for s in old_services if s["api_source"] == source]
+                else:
+                    items = self._catalog(source, state)
+                refs = [detail_id(s) for s in items if detail_id(s) not in stored]
+                details = {d["_id"]: d for d in self.db.details.find({"_id": {"$in": refs}})} if refs else {}
+                current = [stored[detail_id(s)] if detail_id(s) in stored else self._service(s, details.get(detail_id(s)))
+                           for s in items]
+                services.extend(current)
+                counts[source] = len(current)
+                ready[source] = sum(bool(s.get("detail_loaded")) for s in current)
+        # 상태·경고는 자료 변경과 별도로 갱신하되 목록과 상세를 다시 읽지는 않는다.
+        progress = {"revision": meta["revision"], "sources": {
+            source: {**state, "total": counts[source], "ready": ready[source]}
+            for source, state in meta["sources"].items()}}
         states = meta["sources"].values()
         return {"services": services, "counts": counts,
                 "updated_at": min((s["catalog_at"] for s in states), default=0), "sync": progress,

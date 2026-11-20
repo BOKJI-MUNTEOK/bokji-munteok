@@ -1,8 +1,7 @@
-name: Vercel Production Deployment
+name: Vercel Manual Deployment
 
 on:
-  push:
-    branches: [main]
+  # 운영은 Streamlit Community Cloud에서 진행한다. Vercel은 수동 실행만 보관한다.
   workflow_dispatch:
 
 permissions:

@@ -2,9 +2,9 @@
 
 빅데이터실습[YC] 기말 데이터분석 프로젝트 저장소입니다.
 
-> **진행 상태: 공식 복지 API 연동 · Vercel 운영 (11/17)**
+> **진행 상태: 공식 복지 API·MongoDB 연동 · Streamlit Cloud 운영 전환 (11/20)**
 > 고정 샘플 50건 대신 중앙부처·지자체 API의 전체 목록을 불러옵니다. 2026-11-17 연결 확인 시 중앙 461건 + 지자체 4,828건, 총 5,289건이며 실제 건수는 갱신에 따라 달라집니다.
-> `#23`의 Streamlit 화면 구성과 문턱 점수 계산식을 바탕으로, 공식 API와 MongoDB 영구 저장·하루 네 번 자동 갱신을 연결했습니다. 팀원 역할을 정리했고 고정 샘플 50건의 비교 결과를 기록했습니다. 가중치 확정이 남아 있습니다. [서비스 열기](https://bokji-munteok.vercel.app/)
+> 기존 화면과 문턱 점수 계산식을 유지하며, 공식 API와 MongoDB 영구 저장·하루 네 번 자동 갱신을 연결했습니다. 웹에서도 저장된 분석을 재사용하고 추가·변경·삭제된 자료를 반영합니다. 고정 샘플 50건의 비교 결과와 전체 데이터 분석을 기록했으며, 가중치 확정이 남아 있습니다. [서비스 열기](https://bokji-munteok.streamlit.app/)
 
 ## 목차
 
@@ -197,7 +197,7 @@ python src/sample_report.py  # API 키·DB·유료 AI 호출 없이 결과 재�
     </tr>
     <tr>
       <td nowrap>김도형</td>
-      <td>발표자료(PPT), API 연동, DB 연동(MongoDB), 배포(Vercel Cloud)</td>
+      <td>발표자료(PPT), API 연동, DB 연동(MongoDB), 웹 증분 갱신·속도 개선, 배포(Vercel Cloud·Streamlit Cloud 전환)</td>
       <td><a href="https://github.com/kdh0381">kdh0381</a></td>
     </tr>
   </tbody>
@@ -212,15 +212,15 @@ python src/sample_report.py  # API 키·DB·유료 AI 호출 없이 결과 재�
 
 ## 8. 배포 URL
 
-- Vercel 배포 주소: https://bokji-munteok.vercel.app
-- 기존 Streamlit 배포 주소: https://bokji-munteok.streamlit.app
-- `main`에 합치면 GitHub Actions가 Vercel로 자동 배포합니다. 배포 설정은 kdh0381 계정의 Vercel에서 관리합니다.
+- Streamlit 배포 주소: https://bokji-munteok.streamlit.app
+- 기존 Vercel 배포 주소: https://bokji-munteok.vercel.app (자동 배포 중단)
+- Streamlit Community Cloud에서 이 저장소의 `main`과 `app.py`를 연결해 운영합니다. 연결된 `main`의 코드 변경은 Streamlit에 자동 반영됩니다. Vercel로는 자동 배포하지 않습니다.
 
 ### Streamlit Community Cloud에 올리기
 
 Dockerfile 없이도 동작하게 맞춰 두었습니다.
 
-1. share.streamlit.io에서 저장소 `BOKJI-MUNTEOK/bokji-munteok`, 실행 파일 `app.py`, Python 3.12를 고릅니다.
+1. share.streamlit.io에서 기존 앱의 저장소 `BOKJI-MUNTEOK/bokji-munteok`, 브랜치 `main`, 실행 파일 `app.py`, Python 3.12를 확인합니다. 앱 주소는 `bokji-munteok.streamlit.app`을 사용합니다.
 2. `packages.txt`의 `default-jdk-headless`가 Java를 설치합니다. HWP 서식 기입용 hwplib은 첫 사용 때 Maven에서 받아 SHA-256을 확인하고 컴파일합니다(`HWPLIB_AUTO_SETUP`).
 3. 앱 설정 → Secrets에 아래를 넣습니다. 값은 Git에 올리지 않습니다.
 
@@ -231,6 +231,8 @@ Dockerfile 없이도 동작하게 맞춰 두었습니다.
    LLM_API_KEY = "..."     # 선택: AI 상담·쉬운 설명·서류 안내. 없으면 규칙 상담·공식 안내 원문·기본 서류 안내
    JUSO_API_KEY = "..."    # 도로명주소 검색 API 승인키 (선택)
    ```
+
+예약 수집은 기존 GitHub Actions와 MongoDB를 그대로 사용합니다. 웹 설정·자동 반영·확인 방법은 [Streamlit 배포 안내](docs/streamlit-deployment.md)를 참고합니다.
 
 ## 9. 코드와 실행 방법
 
@@ -252,7 +254,7 @@ cp .env.example .env
 
 ### MongoDB 저장소
 
-복지 데이터는 **MongoDB Atlas**에 저장합니다. Atlas 프로젝트와 무료 클러스터 이름은 `BOKJI-MUNTEOK`, 데이터베이스 이름은 `bokji_munteok`입니다. 웹 화면은 저장된 자료를 읽어 보여 주므로 Vercel을 다시 배포해도 수집한 데이터가 사라지지 않습니다.
+복지 데이터는 **MongoDB Atlas**에 저장합니다. Atlas 프로젝트와 무료 클러스터 이름은 `BOKJI-MUNTEOK`, 데이터베이스 이름은 `bokji_munteok`입니다. 웹 화면은 저장된 자료를 읽어 보여 주므로 Streamlit 앱을 다시 시작하거나 배포해도 수집한 데이터가 사라지지 않습니다.
 
 DB에는 다음 정보를 보관합니다.
 
@@ -261,9 +263,9 @@ DB에는 다음 정보를 보관합니다.
 - **갱신 진행 정보**: 마지막 목록 확인 날짜, 추가·변경·삭제 건수, 미수집·재시도 상태
 - **호출 관리 정보**: 키별 일일 사용량과 중복 갱신 방지 잠금. API 키 원문은 DB에 저장하지 않음
 
-연결할 때는 Atlas의 앱 전용 연결 문자열을 `.env`의 `MONGODB_URI`에 넣고, `MONGODB_DATABASE=bokji_munteok`으로 설정합니다. 운영 환경에서는 `MONGODB_URI`를 Vercel의 **Production·Preview 비밀 환경변수**와 예약 수집용 **GitHub Actions Secret**으로 관리합니다. 앱 계정 `bokji-app`은 이 DB의 읽기·쓰기 권한만 사용합니다. 비밀번호와 실제 연결 문자열은 README나 Git에 적지 않습니다.
+연결할 때는 Atlas의 앱 전용 연결 문자열을 `.env`의 `MONGODB_URI`에 넣고, `MONGODB_DATABASE=bokji_munteok`으로 설정합니다. 운영 환경에서는 `MONGODB_URI`를 **Streamlit 앱의 Secrets**와 예약 수집용 **GitHub Actions Secret**으로 관리합니다. 앱 계정 `bokji-app`은 이 DB의 읽기·쓰기 권한만 사용합니다. 비밀번호와 실제 연결 문자열은 README나 Git에 적지 않습니다.
 
-이 DB는 공개 복지서비스 자료를 저장하는 용도입니다. 복지 찾기·신청 준비 도우미에 입력한 이름, 연락처, 주소 등의 사용자 정보는 DB에 저장하지 않습니다. 컬렉션별 구성과 갱신 세부 기준은 [배포 안내의 API·MongoDB 설정](docs/vercel-deployment.md#복지-데이터-apimongodb-설정)을 참고합니다.
+이 DB는 공개 복지서비스 자료를 저장하는 용도입니다. 복지 찾기·신청 준비 도우미에 입력한 이름, 연락처, 주소 등의 사용자 정보는 DB에 저장하지 않습니다. 컬렉션별 구성과 갱신 세부 기준은 [배포 안내의 API·MongoDB 설정](docs/streamlit-deployment.md#복지-데이터-apimongodb-설정)을 참고합니다.
 
 ### 자동 갱신
 
@@ -277,43 +279,36 @@ DB에는 다음 정보를 보관합니다.
 
 다크모드에서는 기존 마크의 문틀을 흰색으로 바꾼 `assets/logo/mark-dark.svg`를 사용합니다. 문 모양과 파란 문턱은 동일하게 유지합니다.
 
-- **서울 서버**: Vercel 웹 서버는 MongoDB와 같은 서울(`icn1`) 지역에서 실행합니다.
 - **필요한 영역만 갱신**: 질문 응답·상담·검색·필터는 해당 영역만 처리하고, 분석 화면은 선택한 탭만 계산합니다. 점수 분포 차트는 집계된 건수를 전달해 전송량을 줄입니다.
-- **계산 결과 재사용**: 목록·상세의 버전과 가중치가 같으면 전체 점수를 다시 계산하지 않습니다. 이미 읽은 상세 안내도 DB에서 다시 가져오지 않습니다.
+- **변경된 자료만 분석**: 웹은 MongoDB의 저장된 규칙 분석 결과를 재사용합니다. 추가·변경된 서비스와 아직 분석이 없는 자료만 분석하고, 삭제된 서비스는 현재 목록에서 제외합니다. 저장 분석이 현재 규칙과 맞지 않으면 해당 서비스만 다시 분석합니다. 가중치를 바꾸면 기존 추출값으로 점수를 계산하므로 원문을 다시 분석하지 않습니다.
+- **변경 없는 갱신은 건너뛰기**: 전체 목록을 확인해도 내용이 같으면 데이터 버전을 올리지 않습니다. 목록 확인 시각만 바뀌었다는 이유로 전체 점수 캐시를 새로 만들지 않습니다.
 - **새 자료 반영**: 저장 자료를 5분간 캐시하고, 만료 후 새로고침·메뉴 이동 등 전체 화면 실행 시 변경된 자료를 읽습니다. 사이드바의 분석 건수는 현재 화면이 읽은 자료 기준입니다. 화면을 열어 두는 것만으로 반복 조회하지 않습니다.
 
-기존 점수식·필터 기준·서류 준비 기능은 유지합니다. 접속이 한동안 없다가 다시 열면 Vercel 서버가 시작되는 시간이 추가될 수 있습니다.
+사이드바의 **최근 목록 변경: 추가·수정·삭제 건수**는 중앙·지자체 각각의 마지막 정상 목록 비교 결과를 합산합니다. 상세 수집·분석 완료 건수와는 구분하며, **목록 확인 시각**은 내용이 같더라도 마지막으로 비교를 완료한 시각입니다.
 
-### Vercel 배포
+기존 점수식·필터 기준·서류 준비 기능은 유지합니다. 검색·정렬·화면 출력에 필요한 처리는 계속 실행되지만, 변경 없는 원문의 반복 분석을 줄입니다. Streamlit 앱이 재시작되어 메모리 캐시가 비어도 DB에 저장된 분석을 다시 사용할 수 있습니다.
 
-자동 배포는 `.github/workflows/deploy-vercel.yml`에서 관리합니다.
-배포용 `VERCEL_TOKEN`은 저장소의 Actions Secret에 등록했습니다.
-공공데이터 키 `DATA_GO_KR_KEY`, `DATA_GO_KR_KEY_2`, `DATA_GO_KR_KEY_3`와 MongoDB 연결 문자열 `MONGODB_URI`는 GitHub Actions Secrets에도 등록해 예약 수집에서 사용합니다. Vercel 웹은 `MONGODB_URI`로 저장 자료를 읽습니다. 값은 저장소에 넣지 않습니다.
-`main` 변경마다 기존 테스트를 통과한 뒤 현재 Vercel 프로젝트로 운영 배포합니다.
-PR 브랜치에 push하는 것만으로는 배포하지 않습니다.
+### 코드 자동 반영과 테스트
 
-인증 키 등록과 실행 확인 방법은 [배포 안내](docs/vercel-deployment.md#자동-배포-설정)를 참고합니다.
-수동 배포가 필요하면 Vercel CLI가 설치된 환경에서 저장소 루트를 기준으로 실행합니다.
+Streamlit Community Cloud가 연결된 `main`의 변경을 자동으로 반영합니다. `.github/workflows/ci.yml`은 PR과 `main` 변경에서 전체 테스트를 실행합니다. **PR 테스트를 확인한 뒤 병합**하며, Streamlit의 자동 반영은 이 테스트 워크플로와 별도로 동작합니다.
 
-```bash
-vercel login
-vercel link --project bokji-munteok --scope kdh0381
-vercel deploy --scope kdh0381          # Preview 배포
-vercel deploy --prod --scope kdh0381   # 운영 배포
-```
+공공데이터 키 `DATA_GO_KR_KEY`, `DATA_GO_KR_KEY_2`, `DATA_GO_KR_KEY_3`와 `MONGODB_URI`는 GitHub Actions Secrets에서 예약 수집에 사용합니다. Streamlit 웹은 앱 Secrets의 `MONGODB_URI`로 저장 자료를 읽습니다. 값은 저장소에 넣지 않습니다.
 
-Framework Preset은 **Container**이고, 루트의 `Dockerfile`이 원본 `streamlit run app.py`를 HTTP 80번 포트로 실행합니다. 로컬 실행 명령은 그대로입니다.
+Vercel의 `main` 자동 배포는 중단했습니다. `.github/workflows/deploy-vercel.yml`은 수동 실행만 남기고, `vercel.json`의 `git.deploymentEnabled`도 `false`로 설정했습니다. 기존 Dockerfile과 수동 배포 절차는 [이전 Vercel 배포 안내](docs/vercel-deployment.md)에 보관합니다.
 
 ### 폴더
 
 | 파일 | 하는 일 |
 | --- | --- |
 | `app.py` | 기존 Streamlit 화면: 홈, 내 복지 찾기, 전체 서비스, 데이터 분석, 안내 |
-| `Dockerfile`, `vercel.json` | 기존 Streamlit 앱을 Vercel Container Runtime에서 실행하는 배포 설정 |
+| `.streamlit/config.toml`, `packages.txt` | Streamlit 화면 설정과 Cloud의 Java 의존성 |
+| `Dockerfile`, `vercel.json` | 이전 Vercel Container 배포 설정 보관. Git 자동 배포는 꺼 둠 |
 | `.dockerignore`, `.vercelignore` | 인증 정보·환경 파일·로컬 개발 파일을 배포에서 제외 |
-| `.github/workflows/deploy-vercel.yml` | `main` 변경 시 기존 테스트를 실행하고 Vercel에 자동 배포 |
+| `.github/workflows/ci.yml` | PR·`main` 변경의 전체 테스트 |
+| `.github/workflows/deploy-vercel.yml` | 필요한 경우에만 직접 실행하는 이전 Vercel 수동 배포 |
 | `.github/workflows/sync-welfare.yml` | 한국시간 00·06·12·18시에 하루 네 번 MongoDB 데이터 갱신 |
-| `docs/vercel-deployment.md` | 배포 절차, 확인 결과와 운영 제약 |
+| `docs/streamlit-deployment.md` | 현재 배포 설정·비밀값·증분 갱신과 확인 방법 |
+| `docs/vercel-deployment.md` | 이전 Vercel 배포 기록과 수동 실행 절차 |
 | `src/welfare_api.py` | 수집용 API 요청·키별 호출 예약·재시도, 웹용 저장 자료 읽기 |
 | `src/welfare_store.py` | MongoDB 목록·상세·분석 저장, 갱신 잠금, 일일 호출량 |
 | `src/welfare_sync.py` | 6시간 구간별 목록 비교, 추가·변경·삭제 반영, 일일 한도 내 상세 이어받기 |

@@ -148,9 +148,8 @@ class WelfareAPI:
 
     def catalog(self):
         with self.snapshot_lock, WelfareStore(self.database_url) as store:
-            revision = store.revision()
-            if self.snapshot_cache is None or self.snapshot_cache["sync"]["revision"] != revision:
-                self.snapshot_cache = store.snapshot()
+            # 상태 안내는 갱신하되, 같은 버전의 원문과 이미 읽은 상세는 재조회하지 않는다.
+            self.snapshot_cache = store.snapshot(previous=self.snapshot_cache, meta=store.metadata())
             return self.snapshot_cache
 
     def services(self, catalog):

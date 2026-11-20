@@ -13,6 +13,7 @@ import evaluate
 import llm
 import rules
 import score
+from analysis_cache import features, weighted_score
 from parse import load_all
 
 
@@ -28,9 +29,11 @@ def build(weights: dict | None = None, mode: str = "규칙", services: list[dict
                          "reason": "상세 조회 후 문턱 점수를 계산합니다."})
             continue
         ai = llm.load_cached(s["servId"], s)
-        ext = ai["extract"] if (mode == "AI" and ai) else rules.extract(s)
-        read = score.readability(s)
-        sc = score.score(ext, read, weights)
+        use_ai = bool(mode == "AI" and ai)
+        ext, read = features(s, rule_required=not use_ai)
+        if use_ai:
+            ext = ai["extract"]
+        sc = weighted_score(ext, read, weights)
         rows.append({"svc": s, "ext": ext, "ext_source": "AI" if (mode == "AI" and ai) else "규칙",
                      "read": read, "ai": ai, **sc})
     rows.sort(key=lambda r: (r["score"] is None, -(r["score"] or 0)))
