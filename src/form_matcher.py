@@ -8,9 +8,12 @@
 """
 from __future__ import annotations
 
+import contextvars
 import re
 from dataclasses import dataclass
 from datetime import date
+
+import field_format
 
 # 서명·날인 차단 목록 (반드시 비워 둠)
 SENSITIVE_RE = re.compile(r"서명|\(인\)|날인|도장|서명\s*또는\s*인|㉿|㊞|\U000f012b")
@@ -40,6 +43,9 @@ OTHER_PERSON_SECTION_RE = re.compile(
     r"세대원|가구원|동거인|가족(?!관계증명)|부양의무자|직계존속|"
     r"미성년자|법정대리인|친권자|후견인|어르신"
     r")(?![가-힣])|"
+    # '신청아동'·'대상아동'처럼 붙여 쓴 아이·학생 칸('아동의 보호자'처럼 뒤에 말이 붙으면 제외)
+    r"(?:신청|대상|지원|해당|입양|출생|위탁|수급|보호)\s*(?:아동|자녀|학생|영유아|아이|아기)(?![가-힣])|"
+    r"출생아(?![가-힣])|부모\s*외의?\s*보\s*호\s*자|"
     r"학생\s*인적사항|보훈\s*대상자|가입\s*선원|권\s*유\s*자|세대\s*구성원|"
     r"가족\s*(?:상황|사항|구성|현황)|부양\s*가족|동거\s*가족|동행(?:\s*가족|\s*인)?|"
     r"동순위\s*수급권자|대표자\s*선정|"
@@ -107,6 +113,27 @@ NON_TARGET_LABEL_RE = re.compile(
 )
 
 
+# 서식에 '신청인' 구역 없이 '대상자' 구역만 있으면 대상자 본인이 신청인이다(장수수당·희망하우징 등).
+# 요청마다 따로 정해지도록 contextvar로 둔다(동시에 여러 사람이 써도 섞이지 않는다).
+BENEFICIARY_IS_APPLICANT: contextvars.ContextVar[bool | None] = contextvars.ContextVar("beneficiary_is_applicant", default=None)
+_BENEFICIARY_RE = re.compile(r"(?:지원|등록|융자|수혜|보호|지급|급여|서비스|봉양)?\s*대\s*상\s*자")
+_APPLICANT_WORD_RE = re.compile(r"신\s*청\s*인|신\s*청\s*자|청\s*구\s*인|신\s*고\s*인|보\s*호\s*자|위\s*임\s*하\s*는")
+
+
+def beneficiary_is_applicant(form_text: str) -> bool:
+    text = form_text or ""
+    return bool(_BENEFICIARY_RE.search(text)) and not _APPLICANT_WORD_RE.search(text)
+
+
+def _other_person(text: str) -> bool:
+    if not OTHER_PERSON_SECTION_RE.search(text):
+        return False
+    if BENEFICIARY_IS_APPLICANT.get():
+        # '대상자'만 걸렸다면 신청인 본인 칸이다.
+        return bool(OTHER_PERSON_SECTION_RE.search(_BENEFICIARY_RE.sub("", text)))
+    return True
+
+
 def display_width_spaces(text: str) -> int:
     """공백 1칸=1 기준으로 텍스트 표시 폭을 계산한다(한글·전각=2, 숫자·영문·반각=1)."""
     return sum(2 if ord(ch) > 0x7F else 1 for ch in (text or ""))
@@ -144,6 +171,83 @@ def is_cell_empty(text: str) -> bool:
     return False
 
 
+# 값 칸에 미리 인쇄된 안내만 있을 때: 값을 앞(prepend)이나 뒤(append)에 넣고 안내는 남긴다.
+_PREFIX_TEMPLATES = {
+    "applicant.name": [r"\(?\s*남\s*[,/·ㆍ]?\s*여\s*\)?"],
+    "applicant.birth_date": [r"\(?\s*남\s*[,/·ㆍ]?\s*여\s*\)?", r"\(\s*만\s*세\s*\)", r"\(\s*양\s*[,/·ㆍ]?\s*음\s*\)"],
+    "applicant.address": [r"\(\s*(?:현\s*거주지|실\s*거주지|주민등록상\s*주소|도로명\s*주소)\s*\)",
+                          r"\(\s*(?:전화(?:번호)?|연락처|휴대(?:폰|전화))\s*[:：]?\s*\)"],
+}
+_APPEND_TEMPLATES = {
+    "applicant.phone": [r"☎\s*[:：]?", r"(?:HP|H\.P|핸드폰|휴대폰)\s*[:：)]"],
+}
+
+
+def template_fill_mode(field_key: str | None, cell_text: str) -> str | None:
+    """값 칸의 글자가 안내 문구뿐이면 'prepend'/'append'를, 아니면 None을 돌려준다."""
+    t = re.sub(r"[ \t\u3000]+", " ", (cell_text or "")).strip()
+    if not field_key or not t or "\n" in t or len(t) > 24 or SENSITIVE_RE.search(t) or re.search(r"\d", t):
+        return None
+    if any(re.fullmatch(p, t) for p in _PREFIX_TEMPLATES.get(field_key, [])):
+        return "prepend"
+    if any(re.fullmatch(p, t) for p in _APPEND_TEMPLATES.get(field_key, [])):
+        return "append"
+    return None
+
+
+IN_CELL_KEYS = ("applicant.name", "applicant.birth_date", "applicant.phone", "applicant.address", "applicant.rrn",
+                "proxy.name", "proxy.phone", "proxy.relation")
+
+
+def can_write_after_label(field_key: str | None, label_text: str, right_text: str | None) -> bool:
+    """정부 표준서식처럼 칸 위쪽에 라벨만 인쇄된 칸이면 라벨 뒤에 값을 이어 쓴다.
+
+    오른쪽이 또 다른 라벨(짧은 글자, 숫자 없음)이거나 오른쪽 칸이 없을 때만 허용한다.
+    """
+    if field_key not in IN_CELL_KEYS:
+        return False
+    label = (label_text or "").strip()
+    if not label or "\n" in label or len(normalize_label(label)) > 12 or SENSITIVE_RE.search(label):
+        return False
+    if right_text is None:
+        return True
+    r = re.sub(r"[ \t\u3000]+", " ", right_text).strip()
+    return bool(r) and "\n" not in r and len(normalize_label(r)) <= 14 and not re.search(r"\d|□|_{2,}|\(\s*\)", r)
+
+
+_ROSTER_HEAD_RE = re.compile(r"가족|가구원|세대원|구성원|부양|자녀|형제|동거|배우자|부모|친족|추천인|보증인")
+
+
+def parent_rows(row: int, col: int, cells: list[tuple[int, int, int, str]]) -> bool:
+    """줄 머리가 '부'·'모'처럼 나뉜 칸: 신청인이 어느 쪽인지 알 수 없어 채우지 않는다."""
+    heads = {normalize_label(t) for r, c, rs, t in cells if c < col and r <= row < r + max(1, rs)}
+    return bool(heads & {"부", "모", "父", "母", "아버지", "어머니", "부친", "모친"})
+
+
+def in_cell_blocked(label_text: str, row: int, col: int, cells: list[tuple[int, int, int, str]]) -> bool:
+    """같은 칸 쓰기를 막아야 하는 표: 같은 열에 같은 라벨이 반복(명부·부/모 칸)되거나 줄 머리가 가족·가구원 등.
+
+    cells: (row, col, row_span, text)
+    """
+    norm = normalize_label(label_text)
+    if sum(1 for r, c, _, t in cells if c == col and normalize_label(t) == norm) > 1:
+        return True
+    return any(c < col and r <= row < r + max(1, rs) and _ROSTER_HEAD_RE.search(normalize_label(t))
+               for r, c, rs, t in cells)
+
+
+# (패턴, 구역, 적용할 최대 글자 수). 구역 머리는 짧다. 긴 문장 속 단어(예: '…(연고자)… 신청합니다')에는 적용하지 않는다.
+_SECTION_OVERRIDES = (
+    (r"본\s*인\s*\(\s*대\s*리\s*신\s*청\s*인\s*포\s*함\s*\)", "applicant", 200),
+    (r"신\s*청\s*인\s*\([^)]*또는\s*대\s*리\s*인\s*\)", "applicant", 200),
+    (r"(?:아동|자녀|학생|아이|영유아)의?\s*인적\s*사항", "other_person", 30),
+    (r"변경\s*전\s*(?:보호자|신청인|수급자|대상자|예금주)", "other_person", 30),
+    (r"(?<!무)연\s*고\s*자|비상\s*연락|긴급\s*연락|공인\s*중개사|중개\s*사무소", "other_person", 30),
+    (r"^대\s*표\s*자\s*(?:정\s*보|인\s*적\s*사\s*항)", "applicant", 30),
+    (r"(?:단체|시설|기관|법인|사업장|업체|센터)\s*정\s*보", "excluded", 30),
+)
+
+
 def detect_section_context(text: str, current: str = "applicant") -> str:
     """표/행 문맥에서 현재 구역을 판별한다 (excluded / other_person / proxy / applicant)."""
     if not text:
@@ -157,17 +261,23 @@ def detect_section_context(text: str, current: str = "applicant") -> str:
     compact_for_sec = re.sub(r"담당\s*공무원으로부터\s*안내[^.\n]*\.?", "", compact_for_sec).strip()
     compact_no_law = re.sub(r"「[^」]*」|『[^』]*』", "", compact_for_sec).strip() or compact_for_sec
     compact_ns = re.sub(r"\s+", "", compact_no_law)
+    # 실제 서식에서 오판하던 문구: 대리인을 포함한 신청인, 아이 인적사항, 변경 전 보호자
+    for pattern, sec, max_len in _SECTION_OVERRIDES:
+        if len(compact_for_sec) <= max_len and re.search(pattern, compact_for_sec):
+            return sec
 
     if EXCLUDED_SECTION_RE.search(compact_no_law) or EXCLUDED_SECTION_RE.search(compact_ns):
         return "excluded"
     if compact_for_sec.startswith("※"):
         return current
-    if compact_for_sec.count("□") >= 2 or len(re.findall(r"\(\s{2,}\)", text)) >= 2:
+    # 체크박스 선택지 줄('□ A □ B', '[ ] A [ ] B')은 구역 머리가 아니다.
+    if (compact_for_sec.count("□") >= 2 or len(re.findall(r"\(\s{2,}\)", text)) >= 2
+            or len(re.findall(r"\[\s*\]", text)) >= 2):
         return current
     if len(compact_ns) <= 80 and FORM_TITLE_RE.search(compact_no_law) and "인우보증" not in compact_ns:
         return current
     if (
-        re.search(r"(?:신청|신고|청구|동의)합니다", compact_ns)
+        re.search(r"(?:신청|신고|청구|동의|요청|제출)합니다", compact_ns)
         and not OFFICIAL_INLINE_CTX_RE.search(compact_no_law)
         and "인우보증" not in compact_ns
     ):
@@ -181,6 +291,9 @@ def detect_section_context(text: str, current: str = "applicant") -> str:
     ):
         return current
 
+    # '부모 외의 보호자'는 신청인(보호자)이 아니라 다른 사람 칸이다.
+    if re.search(r"부모\s*외의?\s*보\s*호\s*자", compact_for_sec):
+        return "other_person"
     # 우선순위: ① 사망/사망인/사망자/사망한/망인/고인 → ②a 신청인(대리신청인) → ②b 대리인 → ②c 신청인/보호자 → ③ 타인 유형
     if DECEASED_SECTION_RE.search(compact_no_law) or DECEASED_SECTION_RE.search(compact_ns):
         return "other_person"
@@ -190,7 +303,7 @@ def detect_section_context(text: str, current: str = "applicant") -> str:
         return "proxy"
     if APPLICANT_SECTION_RE.search(compact_for_sec) or APPLICANT_SECTION_RE.search(compact_ns):
         return "applicant"
-    if OTHER_PERSON_SECTION_RE.search(compact_no_law) or OTHER_PERSON_SECTION_RE.search(compact_ns):
+    if _other_person(compact_no_law) or _other_person(compact_ns):
         return "other_person"
     return current
 
@@ -357,7 +470,23 @@ def match_label(
     section: str = "applicant",
     profile: dict[str, str] | None = None,
 ) -> MatchDecision:
-    """라벨 텍스트와 현재 구역(applicant/proxy/excluded)을 기반으로 매칭 결정을 내린다."""
+    """라벨 텍스트와 현재 구역(applicant/proxy/excluded)을 기반으로 매칭 결정을 내린다.
+
+    '생년월일(YYYYMMDD)'·'연락처(숫자만)'처럼 칸 이름에 형식 안내가 붙어 있으면
+    안내를 떼고 판정한 뒤 값을 그 형식으로 바꾼다.
+    """
+    label, styles = field_format.split_label_hint(raw_label)
+    decision = _match_label(label, section, profile)
+    if styles and decision.action == "fill" and decision.field_key:
+        decision.value = field_format.adapt_value(decision.field_key, decision.value or "", styles)
+    return decision
+
+
+def _match_label(
+    raw_label: str,
+    section: str = "applicant",
+    profile: dict[str, str] | None = None,
+) -> MatchDecision:
     prof = default_profile() if profile is None else profile
     label_clean = re.sub(r"\s+", " ", (raw_label or "")).strip()
     norm = normalize_label(label_clean)
@@ -393,7 +522,7 @@ def match_label(
         if DECEASED_SECTION_RE.search(norm):
             return MatchDecision("skip", reason="other_person", section="other_person")
         if (
-            OTHER_PERSON_SECTION_RE.search(norm)
+            _other_person(norm)
             and not APPLICANT_SECTION_RE.search(norm)
         ):
             return MatchDecision("skip", reason="other_person", section="other_person")
@@ -441,7 +570,7 @@ def match_label(
 
     # 7. 성명
     if norm in (
-        "성명", "성명한글", "한글성명", "이름", "성명예금주",
+        "성명", "성명한글", "한글성명", "성명국문", "국문성명", "이름", "성명예금주",
         "신청인성명", "수급자성명", "이용자성명", "가입자성명",
         "대리인성명", "위임인성명", "수임인성명", "신청자성명",
         "위임하는사람성명", "위임받는사람성명",

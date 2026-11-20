@@ -25,7 +25,7 @@ import form_matcher as fm
 FONT_PATH = Path(__file__).resolve().parent.parent / "assets" / "fonts" / "NanumGothic-Regular.ttf"
 _FONT_NAME = "NanumGothic"
 _FONT_REGISTERED = False
-_INK_COLOR = (0.05, 0.05, 0.25)
+_INK_COLOR = (0, 0, 0)  # 서식 글씨와 같은 검은색
 
 
 def _ensure_font() -> str:
@@ -348,6 +348,7 @@ def _try_acroform_fill(
     writer: PdfWriter,
     prof: dict[str, str],
     report: dict[str, Any],
+    allowed_pages: set[int] | None = None,
 ) -> bool:
     """AcroForm 입력칸(/FT == /Tx)은 한글 깨짐 방지를 위해 필드 /V는 비우고 나눔고딕 오버레이로 그린다."""
     fields = reader.get_fields() or {}
@@ -356,6 +357,8 @@ def _try_acroform_fill(
 
     drawn_pages: list[int] = []
     for p_idx, page in enumerate(writer.pages):
+        if allowed_pages is not None and p_idx not in allowed_pages:
+            continue
         annots = page.get("/Annots") or []
         mx0 = float(page.mediabox.left)
         my0 = float(page.mediabox.bottom)
@@ -383,6 +386,13 @@ def _try_acroform_fill(
             dec = fm.match_label(tu, section="applicant", profile=prof)
             if dec.action != "fill" or not dec.value:
                 continue
+            existing = annot.get("/V") or (parent.get("/V") if parent else "")
+            if str(existing or "").strip():
+                report["skipped_fields"].append({
+                    "label": tu, "location": f"p{p_idx + 1} acroform={fname or tu}",
+                    "reason": "existing_value", "field_key": dec.field_key,
+                })
+                continue
 
             wx0, wy0, wx1, wy1 = [float(v) for v in rect_obj]
             bw, bh = (abs(wy1 - wy0), abs(wx1 - wx0)) if rot in (90, 270) else (abs(wx1 - wx0), abs(wy1 - wy0))
@@ -395,7 +405,11 @@ def _try_acroform_fill(
                     break
                 fs -= 0.5
             if fs < 5.5:
-                fs = 5.5
+                report["skipped_fields"].append({
+                    "label": tu, "location": f"p{p_idx + 1} acroform={fname or tu}",
+                    "reason": "text_overflow", "field_key": dec.field_key,
+                })
+                continue
 
             if rot == 0:
                 ux, uy, ang = (wx0 - mx0) + 3.5, ((wy0 + wy1) / 2 - my0) - fs * 0.35, 0
@@ -517,6 +531,8 @@ def _segment_row_by_vlines(row: list[dict[str, Any]], v_lines: list[tuple[float,
 def fill_pdf_bytes(
     data: bytes,
     profile: dict[str, str] | None = None,
+    *,
+    allowed_pages: set[int] | None = None,
 ) -> tuple[bytes, dict[str, Any]]:
     prof = fm.default_profile() if profile is None else profile
     date_parts = re.findall(r"\d+", prof.get("apply_date") or "")
@@ -558,10 +574,14 @@ def fill_pdf_bytes(
         return data, report
 
     try:
-        if _try_acroform_fill(reader, writer, prof, report):
+        if _try_acroform_fill(reader, writer, prof, report, allowed_pages):
             out_buf = io.BytesIO()
             writer.write(out_buf)
             return out_buf.getvalue(), report
+        if any("acroform=" in item.get("location", "") for item in report["skipped_fields"]):
+            # Do not retry a rejected widget as an ordinary blank table cell.
+            report["status"] = "no_fillable_fields"
+            return data, report
     except Exception as exc:
         report["status"] = "error"
         report["error"] = f"pdf_acroform_error:{type(exc).__name__}"
@@ -587,6 +607,8 @@ def fill_pdf_bytes(
             return data, report
 
         for p_idx, page in enumerate(pdf.pages):
+            if allowed_pages is not None and p_idx not in allowed_pages:
+                continue
             p_no = p_idx + 1
             page_text = page.extract_text() or ""
             if not page_text.strip() or _is_ordinance_page(page_text):
@@ -610,6 +632,7 @@ def fill_pdf_bytes(
             vis_w = vis_x1 - vis_x0
 
             section_bands: list[tuple[float, float, str]] = []
+            band_texts: list[str] = []
             for l in lines:
                 lb = l["bbox"]
                 if lb[0] - vis_x0 < vis_w * 0.30:
@@ -622,11 +645,22 @@ def fill_pdf_bytes(
                         )
                     else:
                         cell_text = l["text"]
+                    # 서식 아래쪽 큰 테두리 상자처럼 글이 많은 칸은 상자 전체가 아니라 이 줄만 보고 판단한다
+                    # (상자 안 '담당 공무원 확인' 문장 때문에 신청인 서명·날짜 줄까지 제외되던 문제).
+                    big_cell = bool(cb) and len(cell_text) > 120
+                    if big_cell:
+                        cell_text = l["text"]
                     sec = fm.detect_section_context(cell_text, current="keep")
                     if sec != "keep":
-                        sy0 = cb[1] if cb else lb[1] - 2
-                        sy1 = cb[3] if cb else lb[3] + 40
+                        sy0 = cb[1] if cb and not big_cell else lb[1] - 2
+                        sy1 = cb[3] if cb and not big_cell else lb[3] + 40
                         section_bands.append((sy0, sy1, sec))
+                        band_texts.append(re.sub(r"\s+", "", cell_text))
+            # 같은 쪽에 '신청인' 구역과 '보호자' 구역이 따로 있으면 보호자는 다른 사람이다(청소년 신청서 등).
+            has_applicant_band = any(re.match(r"신청인(?!\(?보호자)", t) for t in band_texts)
+            for i, t in enumerate(band_texts):
+                if has_applicant_band and re.match(r"보호자", t) and section_bands[i][2] == "applicant":
+                    section_bands[i] = (section_bands[i][0], section_bands[i][1], "other_person")
 
             def section_at_y(y: float) -> str:
                 hits = [sec for sy0, sy1, sec in section_bands if sy0 - 2 <= y <= sy1 + 2]
@@ -646,6 +680,12 @@ def fill_pdf_bytes(
 
             # A. 행 단위 인라인 날짜 ('년 월 일') 및 서명 줄('신청인 ... (서명')
             visual_rows = _cluster_visual_rows(words, y_tol=4.5)
+            # 한 쪽에 '신청인 … (서명)' 줄이 여러 개면 여러 사람이 서명하는 명단이다. 신청인 이름을 넣지 않는다.
+            sig_roster = sum(
+                1 for rw in visual_rows
+                if re.search(r"\(서명", " ".join(w["text"] for w in rw))
+                and re.search(r"신\s*청\s*인|이\s*름\s*:", " ".join(w["text"] for w in rw))
+            ) >= 3
             handled_sig_ys: list[float] = []
             handled_date_ys: list[float] = []
 
@@ -690,6 +730,10 @@ def fill_pdf_bytes(
                     seg_txt = " ".join(w["text"] for w in seg)
                     if not re.search(r"\(서명", seg_txt):
                         continue
+                    if sig_roster:
+                        report["skipped_fields"].append({"label": seg_txt[:30], "location": f"p{p_no} y={yc:.1f}",
+                                                         "reason": "signature_roster"})
+                        continue
                     sig_w = next((w for w in seg if "(서명" in w["text"]), None)
                     if not sig_w:
                         continue
@@ -703,7 +747,7 @@ def fill_pdf_bytes(
                     lbl_grp = next(
                         (
                             grp for grp in reversed(clusters)
-                            if re.search(r"신\s*청\s*인|이\s*름\s*:", " ".join(x["text"] for x in grp))
+                            if re.search(r"신\s*청\s*인|이\s*름\s*:|보\s*호\s*자\s*:|신\s*고\s*인|청\s*구\s*인", " ".join(x["text"] for x in grp))
                             and grp[0]["x0"] - vis_x0 > vis_w * 0.22
                         ),
                         None,
@@ -825,6 +869,12 @@ def fill_pdf_bytes(
                             ]
                             right_bound = min((w["x0"] - 4 for w in next_same_cell_words), default=cell[2] - 2)
                             target_r = (lbl_end + 6, cell[1], right_bound, cell[3])
+                            # 한 칸에 '자택:'/'휴대전화:'처럼 여러 줄이 있으면 이 라벨의 줄 높이에 맞춰 쓴다.
+                            other_rows = [w for w in words if cell[0] <= w["x0"] and w["x1"] <= cell[2]
+                                          and cell[1] <= w["top"] and w["bottom"] <= cell[3]
+                                          and abs((w["top"] + w["bottom"]) / 2 - yc) > 6]
+                            if other_rows:
+                                target_r = (lbl_end + 6, max(cell[1], lb[1] - 3), right_bound, min(cell[3], lb[3] + 3))
                             if not _words_in_rect(words, target_r) and not overlaps_placed(target_r):
                                 ok, fs_used, _ = _plan_insert(draw_queue, target_r, dec.value or "", max_fs=9.5, allow_wrap=False)
                                 if ok:
@@ -874,6 +924,11 @@ def fill_pdf_bytes(
                     })
                     continue
 
+                # '(전화: )'처럼 괄호로 감싼 안내 글자는 칸 이름이 아니다. 다른 칸으로 옮겨 쓰지 않는다.
+                if re.fullmatch(r"\(.*\)", txt.strip()):
+                    report["skipped_fields"].append({"label": txt, "location": f"p{p_no} y={yc:.1f}",
+                                                     "reason": "inline_template_label"})
+                    continue
                 right_adj = _right_adjacent_cell(cell, v_lines)
                 below_adj = _below_adjacent_cell(cell, h_lines)
                 target_adj = None
@@ -885,10 +940,42 @@ def fill_pdf_bytes(
                         min_x_in_adj = min(s["bbox"][0] for s in spans_r)
                         if min_x_in_adj - right_adj[0] >= 120:
                             target_adj = (right_adj[0], right_adj[1], min_x_in_adj - 6, right_adj[3])
-                if target_adj is None and below_adj is not None and not _words_in_rect(words, below_adj):
+                # 오른쪽 칸에 '자택:'·'휴대전화:'·'☎' 같은 작은 라벨이 있으면 값 자리는 그 칸이다(아래 칸으로 내려가지 않는다).
+                right_has_sublabels = right_adj is not None and any(
+                    re.search(r"[:：☎]|휴대|전화|자택|이메일|E-?mail", s.get("text", ""), re.I)
+                    for s in _words_in_rect(words, right_adj))
+                # 아래 칸 바로 왼쪽 칸이 같은 높이의 칸이고 그 안에 칸 이름(예: '주 소')이 있으면 그 이름의 자리다.
+                # 여러 줄을 묶은 '신청인' 같은 머리 칸은 높이가 달라 해당하지 않는다.
+                below_owned = False
+                if below_adj is not None:
+                    left_cell = _cell_bounds_for_rect((below_adj[0] - 4, below_adj[1] + 2, below_adj[0] - 2, below_adj[3] - 2),
+                                                      h_lines, v_lines, vis_x0, vis_x1)
+                    below_owned = bool(left_cell and abs((left_cell[3] - left_cell[1]) - (below_adj[3] - below_adj[1])) < 4
+                                       and left_cell[2] <= below_adj[0] + 2 and _words_in_rect(words, left_cell))
+                    # 아래 칸이 옆 칸까지 합쳐진 큰 칸이고 그 안에 이미 칸 이름(예: '주소')이 있으면 다른 칸이다.
+                    cx, cy = (below_adj[0] + below_adj[2]) / 2, (below_adj[1] + below_adj[3]) / 2
+                    real_below = _cell_bounds_for_rect((cx - 1, cy - 1, cx + 1, cy + 1), h_lines, v_lines, vis_x0, vis_x1)
+                    if real_below and real_below[0] < below_adj[0] - 4 and _words_in_rect(words, real_below):
+                        below_owned = True
+                    # 제목 줄 아래 값 줄처럼 좌우 폭이 라벨 칸과 같을 때만 내려간다(폭이 다르면 다른 칸·다른 구역이다).
+                    if real_below and (abs(real_below[0] - cell[0]) > 4 or abs(real_below[2] - cell[2]) > 4):
+                        below_owned = True
+                if (target_adj is None and below_adj is not None and not right_has_sublabels and not below_owned
+                        and not _words_in_rect(words, below_adj)):
                     if right_adj is None or _words_in_rect(words, right_adj):
                         target_adj = below_adj
 
+                if target_adj is None and dec.field_key in fm.IN_CELL_KEYS and cell[2] - lb[2] >= 100:
+                    # 칸 왼쪽 위에 라벨만 있고 오른쪽이 비어 있으면(정부 서식) 같은 칸 라벨 뒤에 쓴다.
+                    in_cell = (lb[2] + 8, max(cell[1], lb[1] - 3), cell[2] - 4, min(cell[3], lb[3] + 3))
+                    if not _words_in_rect(words, (lb[2] + 4, cell[1], cell[2], cell[3])):
+                        target_adj = in_cell
+                if (target_adj is None and dec.field_key in fm.IN_CELL_KEYS and cell[3] - lb[3] >= 14
+                        and cell[2] - cell[0] >= 60):
+                    # 칸 위쪽에 라벨이 있고 그 아래가 비어 있으면 같은 칸 안 라벨 아래에 쓴다.
+                    under = (cell[0] + 4, lb[3] + 2, cell[2] - 4, cell[3] - 2)
+                    if not _words_in_rect(words, under):
+                        target_adj = under
                 if target_adj is None:
                     report["skipped_fields"].append({
                         "label": txt,

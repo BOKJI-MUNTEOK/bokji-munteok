@@ -176,6 +176,10 @@ class TestApp(unittest.TestCase):
         st.cache_resource.clear()
         self.addCleanup(st.cache_data.clear)
         self.addCleanup(st.cache_resource.clear)
+        # 작업 폴더 .env의 실제 키로 외부(OpenAI·도로명주소)를 부르지 않게 비워 둔다.
+        no_keys = patch.dict("os.environ", {"LLM_API_KEY": "", "OPENAI_API_KEY": "", "JUSO_API_KEY": ""})
+        no_keys.start()
+        self.addCleanup(no_keys.stop)
         self.sample = load_all(ROOT / "data" / "sample")
         patched = patch("welfare_api.WelfareAPI")
         self.api = patched.start().return_value

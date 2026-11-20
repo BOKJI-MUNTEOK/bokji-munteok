@@ -226,6 +226,27 @@ def _set_tc_text(tc: etree._Element, value: str, *, override_char_pr_id: str | N
     return True
 
 
+def _append_tc_text(tc: etree._Element, value: str, *, override_char_pr_id: str | None = None) -> bool:
+    """라벨이 있는 셀의 첫 문단 끝에 run을 하나 덧붙인다(라벨 글자는 그대로 둔다)."""
+    sub = next((ch for ch in tc if _local(ch.tag) == "subList"), None)
+    ps = [ch for ch in sub if _local(ch.tag) == "p"] if sub is not None else []
+    if not ps:
+        return False
+    p0 = ps[0]
+    for lsa in list(p0):
+        if _local(lsa.tag) == "linesegarray":
+            p0.remove(lsa)
+    runs = [ch for ch in p0 if _local(ch.tag) == "run"]
+    char_id = override_char_pr_id or (runs[-1].get("charPrIDRef") if runs else None) or "0"
+    run = etree.Element(f"{{{NS_HP}}}run", charPrIDRef=char_id)
+    etree.SubElement(run, f"{{{NS_HP}}}t").text = value
+    if runs:
+        runs[-1].addnext(run)
+    else:
+        p0.append(run)
+    return True
+
+
 _SLOT_CHARS = frozenset((" ", "_", "\u00a0", "\u3000"))
 _NON_APP_DATE_RE = re.compile(
     r"(?:출산\s*(?:예정)?|사망|발생|접수|지급|입사)\s*일|입금\s*(?:확인|됨)|보험료\s*입금"
@@ -855,6 +876,8 @@ def _row_section_context(row_cells: list[CellInfo], grid: dict[tuple[int, int], 
 def fill_hwpx_bytes(
     data: bytes,
     profile: dict[str, str] | None = None,
+    *,
+    allowed_blocks: dict[str, set[int]] | None = None,
 ) -> tuple[bytes, dict[str, Any]]:
     prof = fm.default_profile() if profile is None else profile
     report: dict[str, Any] = {
@@ -906,9 +929,16 @@ def fill_hwpx_bytes(
                 report["filled_count"] = 0
                 return data, report
             tables = root.xpath(".//*[local-name()='tbl']")
+            body_ps = root.xpath("./*[local-name()='p']")
+            allowed_ps = body_ps if allowed_blocks is None else [
+                p for i, p in enumerate(body_ps) if i in allowed_blocks.get(sec_name, set())
+            ]
+            allowed_tables = None if allowed_blocks is None else {
+                id(t) for p in allowed_ps for t in p.xpath(".//*[local-name()='tbl']")
+            }
 
             _fill_inline_paragraphs(
-                root.xpath("./*[local-name()='p']"),
+                allowed_ps,
                 prof,
                 f"{sec_name} top",
                 report,
@@ -937,6 +967,8 @@ def fill_hwpx_bytes(
                     table_page_excluded[id(sub_tbl)] = bp_excluded
 
             for ti, tbl in enumerate(tables):
+                if allowed_tables is not None and id(tbl) not in allowed_tables:
+                    continue
                 cells, grid, max_r, max_c = _parse_table(tbl)
                 row_map: dict[int, list[CellInfo]] = {}
                 for ci in cells:
@@ -1176,12 +1208,35 @@ def fill_hwpx_bytes(
                                 if below_ci is not None:
                                     target_ci = below_ci
 
+                        write_text = decision.value or ""
+                        append_after_label = False
+                        if target_ci is None and right_ci is not None:
+                            # 값 칸에 '(남, 여)'·'(현 거주지)'·'☎' 같은 안내만 있으면 안내를 남기고 값을 넣는다.
+                            tmode = fm.template_fill_mode(decision.field_key, right_ci.text)
+                            if tmode:
+                                target_ci = right_ci
+                                tmpl = re.sub(r"\s+", " ", right_ci.text).strip()
+                                write_text = f"{write_text}   {tmpl}" if tmode == "prepend" else f"{tmpl} {write_text}"
+                        if target_ci is None and cur_sec not in ("excluded", "other_person") and fm.can_write_after_label(
+                                decision.field_key, txt, right_ci.text if right_ci is not None else None) and not fm.in_cell_blocked(
+                                txt, ci.row, ci.col, [(x.row, x.col, x.row_span, x.text) for x in cells]):
+                            # 정부 표준서식: 칸 위쪽에 라벨만 있으면 같은 칸 라벨 뒤에 이어 쓴다.
+                            target_ci = ci
+                            append_after_label = True
+                        if target_ci is not None and fm.parent_rows(ci.row, ci.col, [(x.row, x.col, x.row_span, x.text) for x in cells]):
+                            report["skipped_fields"].append({
+                                "label": txt.replace("\n", " "),
+                                "location": f"{sec_name} T{ti}({ci.row},{ci.col})",
+                                "reason": "parent_rows",
+                            })
+                            continue
                         if target_ci is None:
                             reason = "non_empty_adjacent_cell" if right_ci is not None else "no_adjacent_target_cell"
                             report["skipped_fields"].append({
                                 "label": txt.replace("\n", " "),
                                 "location": f"{sec_name} T{ti}({ci.row},{ci.col})",
                                 "reason": reason,
+                                "adjacent": (right_ci.text if right_ci is not None else "")[:40],
                             })
                             continue
 
@@ -1214,7 +1269,7 @@ def fill_hwpx_bytes(
                         target_pid = _tc_para_pr_id(target_ci.tc)
                         target_ls = int((para_pr_info.get(target_pid or "") or {}).get("line_space_pct", 160))
                         fits, fit_h, fit_sp, fit_changed = fm.fit_text_to_cell(
-                            decision.value or "",
+                            f"{txt.strip()}  {write_text}" if append_after_label else write_text,
                             target_ci.width,
                             target_ci.height,
                             margin_l=target_ci.margin_l,
@@ -1246,9 +1301,14 @@ def fill_hwpx_bytes(
                                 if created:
                                     header_modified = True
 
-                        if _set_tc_text(target_ci.tc, decision.value or "", override_char_pr_id=override_cid):
+                        if append_after_label:
+                            # 라벨 글자 모양을 바꾸지 않도록 덧붙인 run에만 맞춤 모양을 쓴다.
+                            ok_write = _append_tc_text(target_ci.tc, "  " + write_text, override_char_pr_id=override_cid)
+                        else:
+                            ok_write = _set_tc_text(target_ci.tc, write_text, override_char_pr_id=override_cid)
+                        if ok_write:
                             filled_tcs.add(id(target_ci.tc))
-                            target_ci.text = decision.value or ""
+                            target_ci.text = f"{txt.strip()}  {write_text}" if append_after_label else write_text
                             report["filled_fields"].append({
                                 "label": txt.replace("\n", " "),
                                 "location": f"{sec_name} T{ti}({target_ci.row},{target_ci.col})",

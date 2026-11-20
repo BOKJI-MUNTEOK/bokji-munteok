@@ -36,6 +36,8 @@ COPY src/ src/
 COPY third_party/ third_party/
 COPY data/sample/ data/sample/
 COPY data/ai_cache/ data/ai_cache/
+COPY data/form_registry.json data/form_registry.json
+COPY data/attachment_kinds.json data/attachment_kinds.json
 COPY eval/ eval/
 COPY assets/ assets/
 COPY prompts/ prompts/

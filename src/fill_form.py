@@ -32,6 +32,9 @@ def detect_signature(data: bytes) -> str:
         return "empty"
 
     head = data[:1024]
+    # 기관 보안(파수 DRM)으로 암호화된 파일: 일반 컴퓨터에서는 어떤 프로그램으로도 열리지 않는다.
+    if b"FasooSecureContainer" in head or b"DRMONE" in head:
+        return "drm"
     if b"%PDF-" in head:
         return "pdf"
 
@@ -183,6 +186,7 @@ def fill_form(
     *,
     timeout_sec: int = 20,
     hwplib_dir: Path | None = None,
+    styles: dict[str, str] | None = None,
 ) -> tuple[bytes, dict[str, Any]]:
     """첨부 바이트의 실제 형식을 판별해 알맞은 기입 엔진으로 처리한다.
 
@@ -215,6 +219,7 @@ def fill_form(
                 profile=profile,
                 timeout_sec=timeout_sec,
                 hwplib_dir=hwplib_dir,
+                styles=styles,
             )
         elif fmt == "hwpx":
             out_bytes, rep = fill_hwpx.fill_hwpx_bytes(data, profile=profile)

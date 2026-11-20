@@ -12,12 +12,14 @@ import pandas as pd
 import streamlit as st
 
 import appearance
+import chat_ai
 import evaluate
+import document_ui
+import document_workspace
 import intake
 import llm
 import match
 import numcheck
-import packet
 import paperwork
 import rules
 import score
@@ -208,125 +210,105 @@ def benefit(text: str) -> str:
     return m.group(0) if m else ""
 
 
+@st.cache_data(ttl=7 * 24 * 3600, max_entries=3000, show_spinner=False)
+def live_easy(serv_id, source_hash, _svc):
+    """미리 만든 설명이 없는 서비스는 화면을 열 때 만든다. 공개 안내문이라 사람 사이에 함께 쓴다."""
+    return llm.make_easy_short(_svc)
+
+
+def prefetch_ai(r):
+    """쉬운 설명과 서류 안내를 동시에 만들어 둔다(차례로 만들면 처음 열 때 시간이 더해진다). 실패는 각 탭이 처리한다."""
+    s = r["svc"]
+    jobs = []
+    if not r["ai"] and chat_ai.available():
+        jobs.append(lambda: live_easy(s["servId"], llm.source_hash(s), s))
+    if chat_ai.available() and document_ui.needs_ai_guide(r):
+        jobs.append(lambda: document_ui.cached_guide(str(s["servId"]), document_ui.guide_source(s), s))
+    if len(jobs) < 2:
+        return
+    from concurrent.futures import ThreadPoolExecutor
+    from streamlit.runtime.scriptrunner import add_script_run_ctx, get_script_run_ctx
+    ctx = get_script_run_ctx()
+
+    def run(job):
+        add_script_run_ctx(ctx=ctx)
+        try:
+            job()
+        except Exception:
+            pass
+    with st.spinner("AI가 쉬운 설명과 필요한 서류를 함께 정리하고 있어요"), ThreadPoolExecutor(2) as ex:
+        list(ex.map(run, jobs))
+
+
+def original_text(s):
+    """쉬운 설명 바로 아래에서 공식 안내 원문을 펼쳐 볼 수 있게 한다."""
+    with st.expander("원문 보기 (복지로 공식 안내)"):
+        for field, label in (("target", "지원대상"), ("criteria", "선정기준"), ("benefit", "지원내용"),
+                             ("apply_method_name", "신청방법"), ("apply", "신청절차")):
+            if s.get(field):
+                st.markdown(f"**{label}**")
+                st.text(s[field])
+
+
 def easy_cards(r):
     s, ai = r["svc"], r["ai"]
+    live = False
+    if not ai and chat_ai.available():
+        with st.spinner("AI가 공식 안내문을 쉬운 말로 바꾸고 있어요"):
+            try:
+                ai = {"easy": live_easy(s["servId"], llm.source_hash(s), s)["easy"]}
+                live = True
+            except Exception:  # 키·네트워크 오류는 원문 안내로 대신한다
+                ai = None
     if not ai:
-        st.info("아직 이 원문의 쉬운 설명이 없습니다. 복지로 공식 안내를 그대로 보여 드려요.")
+        st.info("지금은 쉬운 설명을 만들 수 없어 복지로 공식 안내를 그대로 보여 드려요.")
         for field, label in (("target", "누가 받을 수 있나요"), ("criteria", "선정기준"),
                              ("benefit", "무엇을 받나요"), ("apply", "어떻게 신청하나요")):
             st.markdown(f"**{label}**")
             st.text(s[field] or "공식 안내에 내용이 없습니다.")
         return
     e = ai["easy"]
-    how = ("온라인 신청 가능" if r["ext"]["online"] else "방문 신청") + (f"<br>{e['steps'][0]}" if e["steps"] else "")
+    how = ("온라인 신청 가능" if (r.get("ext") or {}).get("online") else "방문 신청") + (f"<br>{e['steps'][0]}" if e["steps"] else "")
     money = benefit(e["what"])
     c = st.columns(3)  # 대상 / 지원 내용 / 신청 방법을 먼저 한눈에
     c[0].markdown(f"<div class='sum'><h4>누가</h4>{e['who']}</div>", unsafe_allow_html=True)
     c[1].markdown(f"<div class='sum'><h4>무엇을</h4>{f'<b class=money>{money}</b><br>' if money else ''}{e['what']}</div>", unsafe_allow_html=True)
     c[2].markdown(f"<div class='sum'><h4>어떻게 신청</h4>{how}</div>", unsafe_allow_html=True)
-    st.markdown("<div class='easy'><h4>조건</h4>" + "<br>".join(f"✔ {c}" for c in e["conditions"]) + "</div>", unsafe_allow_html=True)
-    st.markdown("<div class='easy'><h4>할 일</h4>" + "<br>".join(f"{i}. {x}" for i, x in enumerate(e["steps"], 1)) + "</div>", unsafe_allow_html=True)
+    # 한눈에 보이게 조건·할 일은 3개까지만 보이고 나머지는 접어 둔다.
+    st.markdown("<div class='easy'><h4>조건</h4>" + "<br>".join(f"✔ {escape(c)}" for c in e["conditions"][:3]) + "</div>", unsafe_allow_html=True)
+    st.markdown("<div class='easy'><h4>할 일</h4>" + "<br>".join(f"{i}. {escape(x)}" for i, x in enumerate(e["steps"][:3], 1)) + "</div>", unsafe_allow_html=True)
+    if len(e["conditions"]) > 3 or len(e["steps"]) > 3:
+        with st.expander("자세히 보기"):
+            for c in e["conditions"][3:]:
+                st.markdown(f"✔ {c}")
+            for i, x in enumerate(e["steps"][3:], 4):
+                st.markdown(f"{i}. {x}")
+    if live:
+        st.caption("AI가 복지로 공식 안내문을 쉬운 말로 바꾼 설명이에요.")
+    original_text(s)
     chk = numcheck.check(llm.source_text(s), llm.easy_text(e))
     if chk["ok"]:
         st.caption(f"✅ 원문 숫자 {chk['total']}개가 모두 들어 있는지 확인했어요.")
+    elif live:
+        # 짧은 요약은 핵심 숫자만 담는다. 나머지 숫자는 원문에서 확인하게 한다.
+        st.caption("짧게 줄인 설명이라 일부 숫자(" + ", ".join(chk["missing"][:4]) + ")는 ‘원문 보기’에서 확인하세요.")
     else:
         st.warning("사람 확인 필요 — 빠진 숫자: " + ", ".join(chk["missing"]))
 
 
 def docs_list(r):
-    """서류 준비: 무엇을, 어디서, 방문이 어려우면 어떻게."""
+    """서류를 먼저 보여 주고, 방문 준비물과 문의처를 이어서 안내한다."""
     s = r["svc"]
-    docs, listed = paperwork.documents(r)
-    if listed:
-        st.markdown("**이 복지에 필요한 서류**")
-    else:
-        st.info("안내문에 서류 목록이 없어요. 아래는 대부분의 복지 신청에 기본으로 필요한 서류예요. "
-                "정확한 목록은 첨부 공고문이나 담당 기관에서 확인하세요.")
-        st.markdown("**기본으로 챙길 서류**")
-    for i, d in enumerate(docs):
-        w = paperwork.where(d)
-        st.checkbox(d, key=f"doc_{s['servId']}_{i}",
-                    help=f"{w[0]}{' · 온라인 발급 가능' if w[1] else ''}" if w else "담당 기관에 물어보세요")
-    rows = [{"서류": d, "어디서 떼나요": w[0], "온라인": "가능" if w[1] else "-"} for d in docs if (w := paperwork.where(d))]
-    if rows:
-        st.markdown("**어디서 떼나요**")
-        st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
-    files = s.get("form_files", [])
-    if files:
-        st.markdown("**기관 첨부 파일**")
-        for f in files:
-            c = st.columns([4, 1], vertical_alignment="center")
-            c[0].markdown(f"{'📝 작성 양식' if packet.is_form(f['name']) else '📄 참고 자료'} · {f['name']}")
-            c[1].link_button("받기", f["url"], width="stretch")
-    packet_box(r)
+    document_ui.render_document_workspace(r, st.session_state.get("me"))
+    with st.container(border=True):
+        st.markdown("#### 함께 준비할 서류와 떼는 곳")
+        document_ui.render_needed_documents(r)
     with st.expander("방문이 어렵다면 이렇게 전화해 보세요"):
         st.code(paperwork.call_script(s), language=None, wrap_lines=True)
-    c = st.columns(2, vertical_alignment="center")
     if s.get("contact"):
-        c[0].markdown(f"📞 문의 **{s['contact']}**")
+        st.write(f"문의 전화: {s['contact']}")
     if s.get("link"):
-        c[1].link_button("복지로에서 신청 안내 보기", s["link"], width="stretch")
-
-
-def packet_box(r):
-    """상담·입력 정보로 채운 기관 양식 + 작성 도우미 PDF + 참고자료를 ZIP으로."""
-    s, ss = r["svc"], st.session_state
-    me = ss.get("me")
-    sid = s["servId"]
-    with st.container(border=True):
-        st.markdown("**📦 신청 준비 꾸러미 한 번에 받기**")
-        st.caption(
-            "입력한 정보로 기관 양식(.hwp·.hwpx·.pdf)을 미리 채워(`작성됨_...`) 작성 도우미 PDF와 함께 ZIP 하나로 드려요. "
-            "서명·날인 칸은 비워 두며, 지원하지 않는 양식은 원본 그대로 담고 PDF에 안내해 드려요. 입력한 내용은 저장·전송하지 않아요."
-        )
-        if me:
-            st.markdown("채울 정보: " + " · ".join(([me["name"] + "님"] if me["name"] else []) + intake.summary(me)))
-        else:
-            st.info("'내 복지 찾기'에서 질문에 답하면 주소·나이 등이 자동으로 채워져요. 지금 받으면 비운 칸으로 나와요.")
-        c = st.columns(2)
-        name = c[0].text_input("이름 (선택)", key=f"pk_name_{sid}", placeholder="예: 홍길동",
-                               help="신청서·위임장 성명 칸에만 넣고 저장하지 않아요.")
-        if name.strip():
-            me = {**(me or intake.new_profile()), "name": name.strip()[:10]}
-        phone = c[1].text_input("연락처 (선택)", key=f"pk_phone_{sid}", placeholder="예: 010-0000-0000")
-        c2 = st.columns(2)
-        rrn = c2[0].text_input("주민등록번호 (선택)", key=f"pk_rrn_{sid}", type="password",
-                               placeholder="예: 500101-1234567",
-                               help="기관 양식의 주민등록번호·생년월일 칸에만 채우고 화면·저장소·로그에 남기지 않아요.")
-        monthly_income = c2[1].text_input("월 소득 (선택)", key=f"pk_income_{sid}", placeholder="예: 1,000,000")
-        address = st.text_input("상세 주소 (선택)", key=f"pk_addr_{sid}", placeholder="예: OO로 12, 101동 202호")
-        c3 = st.columns(3)
-        bank = c3[0].text_input("은행명 (선택)", key=f"pk_bank_{sid}", placeholder="예: 농협")
-        account_number = c3[1].text_input("계좌번호 (선택)", key=f"pk_acct_{sid}", placeholder="예: 000-0000-0000-00")
-        account_holder = c3[2].text_input("예금주 (선택)", key=f"pk_holder_{sid}", placeholder="예: 홍길동")
-        c4 = st.columns(2)
-        proxy = c4[0].text_input("대신 내는 사람 성함 (선택)", key=f"pk_proxy_{sid}")
-        relation = c4[1].text_input("신청인과 관계 (선택)", key=f"pk_rel_{sid}", placeholder="예: 자녀")
-        extra = {
-            "phone": phone,
-            "rrn": rrn,
-            "monthly_income": monthly_income,
-            "address": address,
-            "bank": bank,
-            "account_number": account_number,
-            "account_holder": account_holder,
-            "proxy": proxy,
-            "relation": relation,
-        }
-        if st.button("꾸러미 만들기", type="primary", key=f"pk_make_{sid}", width="stretch"):
-            with st.spinner("기관 양식과 작성 도우미를 채우고 복지로에서 자료를 내려받고 있어요"):
-                try:
-                    ss[f"pk_{sid}"] = packet.build_zip(r, me, extra)
-                except Exception as exc:  # 개인정보 보호: 입력값·예외 상세를 화면·로그에 남기지 않는다
-                    ss.pop(f"pk_{sid}", None)
-                    st.error("꾸러미를 만들지 못했어요. 인터넷 연결을 확인하고 다시 눌러 주세요.", icon=":material/error:")
-                    st.caption(f"오류 종류: {type(exc).__name__}")
-        if made := ss.get(f"pk_{sid}"):
-            data, failed = made
-            st.download_button("ZIP 내려받기", data, file_name=f"신청준비_{s['servNm'][:30]}.zip", mime="application/zip",
-                               icon=":material/download:", width="stretch", key=f"pk_dl_{sid}")
-            if failed:
-                st.warning(f"원본 {len(failed)}개는 복지로에서 받지 못해 주소만 넣었어요: " + ", ".join(failed))
+        st.link_button("복지로에서 신청 안내 보기", s["link"], width="stretch")
 
 
 def score_parts(r):
@@ -361,7 +343,8 @@ def detail(r):
     st.markdown(f"<div class='dlg-t'>{escape(s['servNm'])}</div><div class='dlg-sub'>{escape(s['org'])} · {escape(s['region'])} · "
                 f"<span class='band band-{b[0]}'>{b[1]} · 문턱 {r['score']}점</span></div>", unsafe_allow_html=True)
     st.caption(f"상세 조회: {updated_time(s['detail_fetched_at'])} (한국시간)")
-    t1, t2, t3, t4 = st.tabs(["쉬운 설명", "서류 준비", "왜 이 점수?", "원문"])
+    prefetch_ai(r)
+    t1, t2, t3, t4 = st.tabs(["쉬운 설명", "서류 작성·인쇄", "왜 이 점수?", "원문"])
     with t1:
         easy_cards(r)
     with t2:
@@ -375,13 +358,19 @@ def detail(r):
             st.text(s[k] or "(비어 있음)")
 
 
+def has_form(r):
+    """신청서로 분류된 첨부가 있으면 내 정보로 바로 채울 수 있다(사업안내·지침만 있으면 아니다)."""
+    return any(document_workspace.attachment_kind(f.get("name", ""), f.get("url")) == "form" for f in r["svc"].get("form_files") or [])
+
+
 def card(r, key, why=None):
     s = r["svc"]
     b = band(r["score"]) if r["score"] is not None else None
     what = r["ai"]["easy"]["what"] if r["ai"] else s["summary"]
     money = benefit(what)
     with st.container(border=True):
-        st.badge(b[1] if b else "상세 확인 전", color=b[4] if b else "gray")
+        doc_badge = ":blue-badge[📝 신청서 바로 작성]" if has_form(r) else ":gray-badge[📄 신청서 받는 방법 안내]"
+        st.markdown(f":{b[4] if b else 'gray'}-badge[{b[1] if b else '상세 확인 전'}] {doc_badge}")
         st.markdown(f"<div class='svc'>{escape(s['servNm'])}</div><div class='money-line'>{f'💰 {escape(money)}' if money else '&nbsp;'}</div>"
                     f"<div class='what'>{escape(what)}</div>", unsafe_allow_html=True)
         st.caption(" · ".join(why) if why else s["region"])
@@ -395,6 +384,28 @@ def grid(items, prefix, n=3):
         for col, (r, why) in zip(st.columns(n), items[i:i + n]):
             with col:
                 card(r, f"{prefix}_{r['svc']['servId']}", why)
+
+
+def split_grid(items, prefix, n=3, first=None):
+    """신청서를 바로 채울 수 있는 복지와 신청서 파일이 없는 복지를 탭으로 나눠 보여 준다."""
+    ready = [x for x in items if has_form(x[0])]
+    rest = [x for x in items if not has_form(x[0])]
+    tabs = st.tabs([f"📝 신청서 바로 작성 가능 {len(ready):,}개", f"📄 신청서 파일 없음 {len(rest):,}개 (받는 방법 안내)"])
+    for tab, group, key in ((tabs[0], ready, "form"), (tabs[1], rest, "noform")):
+        with tab:
+            if key == "form":
+                st.caption("‘신청 방법 보기 → 서류 작성·인쇄’에서 내 정보가 들어간 신청서를 바로 볼 수 있어요.")
+            else:
+                st.caption("복지로에 신청서 파일이 없어요. ‘신청 방법 보기’에서 신청서 받는 곳과 필요한 서류를 쉽게 안내해 드려요.")
+            if not group:
+                st.info("해당하는 복지가 없어요.")
+            elif first:
+                grid(group[:first], f"{prefix}_{key}", n)
+                if len(group) > first:
+                    with st.expander(f"나머지 {len(group) - first}개 더 보기"):
+                        paged_grid(group[first:], f"{prefix}_{key}_more", n)
+            else:
+                paged_grid(group, f"{prefix}_{key}", n)
 
 
 def paged_grid(items, prefix, n=3):
@@ -524,7 +535,7 @@ def steps():
 
 def report(p):
     """상담 답으로 찾은 결과를 분석표처럼 보여 준다."""
-    st.session_state.me = p  # 서류 준비 꾸러미에 채울 정보
+    st.session_state.me = p  # 서류 작성에 채울 정보
     c = intake.conditions(p)
     recs = match.recommend(ROWS, **c)
     # 태그가 하나도 안 맞은 것(대상 태그가 비어 누구에게나 걸리는 서비스)은 따로 접어 둔다
@@ -551,14 +562,110 @@ def report(p):
         st.info(f"상세를 확인한 {len(scored)}건 중 **{easiest['svc']['servNm']}**의 문턱 점수가 {easiest['score']}점으로 가장 낮아요.")
     st.caption("공식 태그로 먼저 찾은 목록이에요. '신청 방법 보기'를 누르면 세부 지원 조건을 확인하고 문턱 점수를 계산해요. "
                "신청 난이도 비교는 상세를 확인한 서비스에만 적용돼요.")
-    grid(hit[:4], "rec", n=2)
-    if len(hit) > 4:
-        with st.expander(f"나머지 {len(hit) - 4}개 더 보기"):
-            paged_grid(hit[4:], "rec_more", n=2)
+    ss = st.session_state
+    if ss.get("mode") == "상담으로 찾기" and ss.get("ai_done") and (picks := ss.get("ai_picks")):
+        by_id = {r["svc"]["servId"]: (r, why) for r, why in hit}
+        first = [by_id[sid] for sid in picks if sid in by_id]
+        if first:
+            st.markdown("<div class='sec-t'>먼저 볼 복지 (AI 상담 추천)</div>", unsafe_allow_html=True)
+            grid(first, "pick", n=len(first) if len(first) < 3 else 3)
+            st.markdown("<div class='sec-t'>찾은 복지 전체</div>", unsafe_allow_html=True)
+    split_grid(hit, "rec", n=2, first=4)
     if loose:
         with st.expander(f"대상 구분 없이 누구나 볼 수 있는 복지 {len(loose)}개"):
             paged_grid(loose, "rec_loose", n=2)
     st.caption("공식 목록의 지역·생애주기·대상 태그로 고른 결과예요. 실제 자격은 담당 기관에서 확인해요.")
+
+
+def ai_results_message(p):
+    """상담이 끝나면 AI가 먼저 잘 맞는 복지 3개를 짚고 다음 할 일(신청서 채우기)로 이끈다."""
+    recs = match.recommend(ROWS, **intake.conditions(p))
+    hit = [r for r, why in recs if why] or [r for r, _ in recs]
+    if not hit:
+        return ("말씀하신 조건에 딱 맞는 복지를 찾지 못했어요. 지역이나 필요한 도움을 조금 다르게 말씀해 주시면 다시 찾아볼게요.")
+    # 규칙으로 고른 후보 중 AI가 상담 내용에 가장 맞는 3개를 고른다. 실패하면 규칙 순서.
+    by_id = {r["svc"]["servId"]: r for r in hit[:15]}
+    picks = chat_ai.pick(st.session_state.get("ai_msgs", []), [r["svc"] for r in hit[:15]]) or \
+        [(r["svc"]["servId"], "") for r in hit[:3]]
+    st.session_state.ai_picks = [sid for sid, _ in picks]
+    lines = []
+    for i, (sid, why) in enumerate(picks, 1):
+        r = by_id[sid]
+        what = r["ai"]["easy"]["what"] if r.get("ai") else r["svc"]["summary"]
+        lines.append(f"{i}. **{r['svc']['servNm']}** — {why or benefit(what) or what[:40]}")
+    return (f"말씀하신 상황에 맞는 복지를 **{len(hit)}개** 찾았어요. 이것부터 먼저 보세요.\n\n" + "\n".join(lines)
+            + "\n\n아래 ‘**먼저 볼 복지**’에서 ‘**신청 방법 보기**’를 누르면 쉬운 설명을 보여 드리고, "
+            "‘**서류 작성·인쇄**’ 탭에서 신청서를 내 정보로 바로 채워 드려요."
+            + ("" if p.get("name") and p.get("phone") else
+               "\n\n신청서를 미리 채워 드릴까요? 원하시면 **이름**부터 알려 주세요. "
+               "생년월일·연락처·주소도 차례로 여쭤볼게요(주민등록번호·계좌번호는 묻지 않아요)."))
+
+
+def ai_chat():
+    """AI 상담: 자유롭게 말하면 OpenAI가 되묻고, 들은 내용으로 복지를 찾는다."""
+    ss = st.session_state
+    n = len(intake.QUESTIONS)
+    if "ai_msgs" not in ss:
+        ss.ai_msgs, ss.ai_done, ss.ai_prof, ss.qi = [{"role": "assistant", "content": chat_ai.GREETING}], False, intake.new_profile(), 0
+
+    def restart():
+        for k in ("ai_msgs", "ai_done", "ai_prof", "ai_pending", "ai_error", "ai_retry", "ai_picks", "ai_prev_prof"):
+            ss.pop(k, None)
+        ss.qi = 0
+
+    def submit():
+        if text := (ss.get("ai_answer") or "").strip():
+            ss.ai_pending = text[:500]
+
+    def show_results():
+        if not ss.get("ai_done"):
+            ss.ai_msgs.append({"role": "assistant", "content": ai_results_message(ss.ai_prof)})
+        ss.ai_done, ss.qi = True, n
+
+    def to_steps():
+        ss.mode = "질문에 답하기"
+
+    head = st.columns([4, 1], vertical_alignment="center")
+    head[0].caption("대화 내용은 답을 만들기 위해 OpenAI로 보내고 저장하지 않아요. 알려 주신 이름·연락처·주소는 신청서를 미리 채우는 데만 써요. "
+                    "주민등록번호·계좌번호는 적지 마세요.")
+    head[1].button("처음부터", width="stretch", on_click=restart, key="ai_restart")
+    pending = ss.pop("ai_pending", None)
+    if pending:
+        ss.ai_msgs.append({"role": "user", "content": pending})
+    if pending or ss.pop("ai_retry", False):
+        with st.spinner("AI가 답을 쓰고 있어요"):
+            try:
+                out = chat_ai.turn(ss.ai_msgs, PLACES)
+            except Exception:  # 대화 내용·예외 상세는 화면에 남기지 않는다
+                ss.ai_error = True
+            else:
+                ss.pop("ai_error", None)
+                ss.ai_msgs.append({"role": "assistant", "content": out["reply"]})
+                ss.ai_prof = out["profile"]
+                before = intake.conditions(ss.get("ai_prev_prof") or ss.ai_prof)
+                ss.ai_prev_prof = out["profile"]
+                if ss.ai_done and intake.conditions(out["profile"]) != before:
+                    # 결과를 본 뒤 조건(지역·나이·필요한 도움 등)이 바뀌면 다시 찾아 안내한다.
+                    ss.ai_msgs.append({"role": "assistant", "content": ai_results_message(ss.ai_prof)})
+                elif out["done"] and not ss.ai_done:
+                    show_results()
+    with st.container(height=380, border=True, key="chatbox"):
+        for m in ss.ai_msgs:
+            st.chat_message(m["role"], avatar=str(LOGO / "mark.svg") if m["role"] == "assistant" else None).markdown(m["content"])
+    if ss.get("ai_error"):
+        st.error("AI가 답을 만들지 못했어요. 다시 시도하거나 ‘하나씩 골라서 찾기’로 바꿔 주세요.")
+        c = st.columns(2)
+        c[0].button("다시 시도", width="stretch", key="ai_retry_btn", on_click=lambda: ss.__setitem__("ai_retry", True))
+        c[1].button("하나씩 골라서 찾기로 바꾸기", width="stretch", key="ai_to_steps", on_click=to_steps)
+    p = ss.ai_prof
+    if heard := intake.summary(p) if (p["sido"] or p["age"] is not None or p["themes"] or p["groups"]) else []:
+        st.caption("지금까지 들은 내용: " + " · ".join(heard))
+    st.chat_input("여기에 편하게 적어 주세요" if not ss.ai_done else "더 알려 주실 게 있으면 적어 주세요",
+                  key="ai_answer", on_submit=submit)
+    if not ss.ai_done and p["sido"] and p["age"] is not None:
+        st.button("지금까지 들은 내용으로 복지 찾기", width="stretch", key="ai_show", on_click=show_results)
+    if ss.ai_done:
+        report(p)
 
 
 def chat():
@@ -617,7 +724,7 @@ QUICK = [("청년", ":material/school:", {"life": ["청년"]}), ("어르신", ":
          ("장애인", ":material/accessible:", {"groups": ["장애인"]}), ("저소득", ":material/savings:", {"groups": ["저소득"]})]
 
 
-# 내부 값은 그대로 두고 보이는 이름만 바꾼다(상담은 OpenAI 연결 예정)
+# 내부 값은 그대로 두고 보이는 이름만 바꾼다. 상담은 OpenAI 키가 있으면 AI 대화, 없으면 정해진 질문으로 진행한다.
 MODES = {"질문에 답하기": ":material/checklist: 하나씩 골라서 찾기", "상담으로 찾기": ":material/smart_toy: AI와 대화로 찾기"}
 
 
@@ -633,7 +740,7 @@ def quick_start(name, c):
 
 STEPS = [(":material/checklist:", "질문에 답하기", "지역·나이 등 6가지를 골라요"),
          (":material/fact_check:", "맞춤 복지 확인", "조건이 맞고 신청이 쉬운 순서로"),
-         (":material/description:", "서류 준비", "신청서 작성 도우미까지 한 번에")]
+         (":material/description:", "서류 준비", "채워진 신청서를 보고 바로 인쇄")]
 
 
 def home():
@@ -685,7 +792,7 @@ def mine():
         mode = st.segmented_control("방법", list(MODES), key="mode", label_visibility="collapsed", width="stretch",
                                     format_func=MODES.get)
         if mode == "상담으로 찾기":
-            chat()
+            ai_chat() if chat_ai.available() else chat()
         else:
             steps()
     with right, st.container(key="quick"):
@@ -720,7 +827,7 @@ def browse():
     st.caption(f"{len(rows):,}건 · 문턱 점수 조회 완료 {sum(r['score'] is not None for r in ROWS):,}건 / 전체 {len(ROWS):,}건")
     st.caption("신청 난이도 필터·점수 정렬은 상세를 조회한 서비스 기준이에요. 미조회 서비스는 점수순 정렬에서 뒤에 나와요.")
     if rows:
-        paged_grid([(r, None) for r in rows], "all")
+        split_grid([(r, None) for r in rows], "all")
     else:
         st.info("조건에 맞는 서비스가 없어요. 검색어나 필터를 바꿔 보세요.")
 
@@ -870,7 +977,7 @@ def guide():
 원문 숫자(나이·%·금액·기간·횟수)가 쉬운 설명에도 있는지 대조합니다. 빠지면 '사람 확인 필요'를 붙입니다.
 
 #### 신청 준비 (11/17 이후 구현, AI 없음)
-신청서·위임장 빈칸 채우기, 서류 발급처 안내, 직권 신청 요청 문구. 접수 대행은 하지 않습니다.
+신청서·위임장 빈칸 채우기, 작성 결과 미리보기·개별 저장·인쇄, 서류 발급처 안내. 접수 대행은 하지 않습니다.
 """)
     st.caption(f"자료: 한국사회보장정보원 복지서비스 API(공공데이터포털, 중앙부처 15090532 · 지자체 15108347) "
                f"목록 {len(SV):,}건 · 조회 {updated_time(CATALOG['updated_at'])} (한국시간)")
