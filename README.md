@@ -216,6 +216,22 @@ python src/sample_report.py  # API 키·DB·유료 AI 호출 없이 결과 재�
 - 기존 Streamlit 배포 주소: https://bokji-munteok.streamlit.app
 - `main`에 합치면 GitHub Actions가 Vercel로 자동 배포합니다. 배포 설정은 kdh0381 계정의 Vercel에서 관리합니다.
 
+### Streamlit Community Cloud에 올리기
+
+Dockerfile 없이도 동작하게 맞춰 두었습니다.
+
+1. share.streamlit.io에서 저장소 `BOKJI-MUNTEOK/bokji-munteok`, 실행 파일 `app.py`, Python 3.12를 고릅니다.
+2. `packages.txt`의 `default-jdk-headless`가 Java를 설치합니다. HWP 서식 기입용 hwplib은 첫 사용 때 Maven에서 받아 SHA-256을 확인하고 컴파일합니다(`HWPLIB_AUTO_SETUP`).
+3. 앱 설정 → Secrets에 아래를 넣습니다. 값은 Git에 올리지 않습니다.
+
+   ```toml
+   HWPLIB_AUTO_SETUP = "1"
+   MONGODB_URI = "..."
+   MONGODB_DATABASE = "bokji_munteok"
+   LLM_API_KEY = "..."     # 선택: AI 상담·쉬운 설명·서류 안내. 없으면 규칙 상담·공식 안내 원문·기본 서류 안내
+   JUSO_API_KEY = "..."    # 도로명주소 검색 API 승인키 (선택)
+   ```
+
 ## 9. 코드와 실행 방법
 
 ### 로컬 실행
