@@ -153,9 +153,12 @@ def search_juso(keyword: str, *, opener=None, limit: int = 5) -> list[dict] | No
             data = json.load(r)
         common = data["results"]["common"]
         if common.get("errorCode") != "0":
+            # 운영 로그에서 원인을 볼 수 있게 오류 코드만 남긴다(주소·키는 남기지 않는다).
+            print(f"[juso] errorCode={common.get('errorCode')}", flush=True)
             return None
         rows = data["results"].get("juso") or []
-    except Exception:
+    except Exception as exc:
+        print(f"[juso] {type(exc).__name__}: {str(exc)[:80].replace(key, '***')}", flush=True)
         return None
     return [{"road": str(j.get("roadAddrPart1") or j.get("roadAddr") or "").strip(),
              "jibun": str(j.get("jibunAddr") or "").strip(),
@@ -209,6 +212,8 @@ def check(address: str, *, chat=None, opener=None) -> dict:
         result["notes"].append("도로명주소 검색을 쓰지 못해 실제 주소인지 확인하지 못했습니다.")
         return result
     result["juso_used"] = True
+    # 도로명주소 검색으로 확인했으면 AI 검수를 못 쓴 것은 사용자가 알 필요 없다.
+    result["notes"] = [n for n in result["notes"] if not n.startswith("AI 검수를")]
     result["candidates"] = [{**c, "full": f"{c['road']} {detail}".strip()} for c in found]
     if found and not exact:
         result["notes"].append("입력한 건물번호와 똑같은 주소는 없어요. 아래 비슷한 주소 중 맞는 것이 있으면 고르고, "

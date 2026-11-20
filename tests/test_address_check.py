@@ -196,6 +196,12 @@ class Check(unittest.TestCase):
         self.assertFalse(r["verified"])
         self.assertTrue(any("덜 적혔어요" in n for n in r["notes"]))
 
+    def test_juso_without_ai_key_hides_ai_note(self):
+        with patch.dict(os.environ, {**NO_KEYS, "JUSO_API_KEY": "k"}), patch("address_check.load_env"):
+            r = ac.check("서울강남구테헤란로123", opener=juso_reply(["서울특별시 강남구 테헤란로 123"]))
+        self.assertTrue(r["verified"])
+        self.assertEqual(r["notes"], [])
+
     def test_no_match_is_reported(self):
         with patch.dict(os.environ, {**NO_KEYS, "JUSO_API_KEY": "k"}), patch("address_check.load_env"):
             r = ac.check("없는시 없는로 999", opener=juso_reply([]))
