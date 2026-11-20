@@ -209,6 +209,8 @@ def check(address: str, *, chat=None, opener=None) -> dict:
         result["notes"].append("도로명주소 검색을 쓰지 못해 실제 주소인지 확인하지 못했습니다.")
         return result
     result["juso_used"] = True
+    # 도로명주소 검색으로 확인했으면 AI 검수를 못 쓴 것은 사용자가 알 필요 없다.
+    result["notes"] = [n for n in result["notes"] if not n.startswith("AI 검수를")]
     result["candidates"] = [{**c, "full": f"{c['road']} {detail}".strip()} for c in found]
     if found and not exact:
         result["notes"].append("입력한 건물번호와 똑같은 주소는 없어요. 아래 비슷한 주소 중 맞는 것이 있으면 고르고, "

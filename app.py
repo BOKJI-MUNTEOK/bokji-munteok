@@ -261,7 +261,7 @@ def easy_cards(r):
             except Exception:  # 키·네트워크 오류는 원문 안내로 대신한다
                 ai = None
     if not ai:
-        st.info("지금은 쉬운 설명을 만들 수 없어 복지로 공식 안내를 그대로 보여 드려요.")
+        st.info("이 복지는 쉬운 설명이 아직 준비되지 않아 복지로 공식 안내를 그대로 보여 드려요.")
         for field, label in (("target", "누가 받을 수 있나요"), ("criteria", "선정기준"),
                              ("benefit", "무엇을 받나요"), ("apply", "어떻게 신청하나요")):
             st.markdown(f"**{label}**")
