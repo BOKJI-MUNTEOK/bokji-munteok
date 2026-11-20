@@ -13,6 +13,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +23,10 @@ import form_matcher as fm
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 JAR_NAME = "hwplib-1.1.10.jar"
+JAR_URL = "https://repo1.maven.org/maven2/kr/dogfoot/hwplib/1.1.10/hwplib-1.1.10.jar"
+JAR_SHA256 = "fce557a7b4aff0c626c544558e0939459601a008d9378457b6183f7f3ae9d1b9"  # Dockerfile과 같은 값
+_SETUP_LOCK = threading.Lock()
+_setup_tried = False
 
 
 def _resolve_hwplib_runtime(hwplib_dir: Path | None = None) -> tuple[str, Path, Path] | None:
@@ -42,7 +47,42 @@ def _resolve_hwplib_runtime(hwplib_dir: Path | None = None) -> tuple[str, Path, 
         classes = base / "classes"
         if jar.is_file() and (classes / "HwpLibTool.class").is_file():
             return java_bin, jar, classes
+    if hwplib_dir is None and os.environ.get("HWPLIB_AUTO_SETUP") == "1" and auto_setup(ROOT_DIR / ".cache" / "hwplib"):
+        return _resolve_hwplib_runtime(ROOT_DIR / ".cache" / "hwplib")
     return None
+
+
+def auto_setup(base: Path) -> bool:
+    """Docker를 쓰지 않는 배포(Streamlit Community Cloud)에서 hwplib을 한 번 준비한다.
+
+    HWPLIB_AUTO_SETUP=1일 때만 쓴다. Maven에서 받은 jar의 SHA-256을 Dockerfile과 같은 값으로 확인하고
+    java/HwpLibTool.java를 javac로 컴파일한다. 실패하면 False(HWP는 원본 그대로 두는 기존 동작).
+    """
+    global _setup_tried
+    with _SETUP_LOCK:
+        if (base / JAR_NAME).is_file() and (base / "classes" / "HwpLibTool.class").is_file():
+            return True
+        javac = shutil.which("javac")
+        if _setup_tried or not javac:
+            return False
+        _setup_tried = True
+        import hashlib
+        import urllib.request
+        try:
+            with urllib.request.urlopen(JAR_URL, timeout=60) as r:
+                data = r.read()
+            if hashlib.sha256(data).hexdigest() != JAR_SHA256:
+                return False
+            (base / "classes").mkdir(parents=True, exist_ok=True)
+            jar = base / JAR_NAME
+            tmp = jar.with_suffix(".part")
+            tmp.write_bytes(data)
+            tmp.replace(jar)
+            done = subprocess.run([javac, "-encoding", "UTF-8", "-cp", str(jar), "-d", str(base / "classes"),
+                                   str(ROOT_DIR / "java" / "HwpLibTool.java")], capture_output=True, timeout=180)
+            return done.returncode == 0 and (base / "classes" / "HwpLibTool.class").is_file()
+        except Exception:
+            return False
 
 
 def _dump_text(node: Any) -> str:
