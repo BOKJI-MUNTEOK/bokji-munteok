@@ -300,6 +300,9 @@ def _can_fill_address_cell_first_line(cell_text: str) -> int | None:
     return None
 
 
+APPLICANT_ROW_HEAD_RE = re.compile(r"^(?:주소|현주소|전화번호|연락처|휴대전화|휴대폰|핸드폰)$")
+
+
 def plan_hwp_fills(doc_dump: dict[str, Any], profile: dict[str, str] | None = None) -> dict[str, Any]:
     prof = fm.default_profile() if profile is None else profile
     report: dict[str, Any] = {
@@ -408,10 +411,16 @@ def plan_hwp_fills(doc_dump: dict[str, Any], profile: dict[str, str] | None = No
             any(fm.OLD_BLOCK_HEAD_RE.match(t) for t in norm_cell_texts)
             and any(fm.NEW_BLOCK_HEAD_RE.match(t) for t in norm_cell_texts)
         )
+        head_restore: tuple[int, str] | None = None  # (구역 머리 칸이 끝나는 줄, 되돌릴 구역)
         for r in range(max_r):
             row_cells = sorted(row_map.get(r, []), key=lambda x: x["col"])
             # 왼쪽 병합 구역 헤더(col 0) 및 배너 제목 행 확인
             c0_cell = grid.get((r, 0))
+            if (head_restore and r >= head_restore[0] and c0_cell and c0_cell["row"] == r
+                    and APPLICANT_ROW_HEAD_RE.match(fm.normalize_label(c0_cell.get("text", "")))):
+                # '입양아동' 같은 구역 머리 칸이 끝나고 '주소'·'전화번호' 줄이 오면 원래 구역으로 돌아간다.
+                tbl_section = head_restore[1]
+                head_restore = None
             if c0_cell and c0_cell.get("text"):
                 c0_norm_head = fm.normalize_label(c0_cell["text"])
                 if (
@@ -424,6 +433,8 @@ def plan_hwp_fills(doc_dump: dict[str, Any], profile: dict[str, str] | None = No
                 else:
                     sec = fm.detect_section_context(c0_cell["text"], current="keep")
                     if sec != "keep":
+                        if sec == "other_person" and tbl_section == "applicant" and c0_cell["row"] == r:
+                            head_restore = (r + max(1, c0_cell.get("row_span", 1)), tbl_section)
                         tbl_section = sec
             if c0_cell and max(1, c0_cell.get("row_span", 1)) >= 2:
                 band_r0 = c0_cell["row"]
@@ -877,6 +888,7 @@ def plan_hwp_fills(doc_dump: dict[str, Any], profile: dict[str, str] | None = No
                 target_c = None
                 target_para_idx = 0
                 edit_mode = "set"
+                template_text = ""
                 extra_phone_anchor: tuple[str, str] | None = None
                 if right_c is not None:
                     r_text = right_c.get("text", "")
@@ -923,6 +935,13 @@ def plan_hwp_fills(doc_dump: dict[str, Any], profile: dict[str, str] | None = No
                                 if can_ph:
                                     extra_phone_anchor = (m_par.group(1), app_phone)
                                 handled_inline_cells.add((t_idx, right_c["cell_idx"]))
+                if target_c is None and right_c is not None:
+                    # 값 칸에 '(남, 여)'·'(현 거주지)'·'☎' 같은 안내만 있으면 안내를 남기고 값을 넣는다.
+                    tmode = fm.template_fill_mode(dec.field_key, right_c.get("text", ""))
+                    if tmode:
+                        target_c = right_c
+                        edit_mode = "prepend_trim_spaces" if tmode == "prepend" else "append"
+                        template_text = right_c.get("text", "").strip()
                 if target_c is None and c["row"] + rs < max_r:
                     below_c = grid.get((c["row"] + rs, c["col"]))
                     if (
@@ -970,6 +989,18 @@ def plan_hwp_fills(doc_dump: dict[str, Any], profile: dict[str, str] | None = No
                 if (
                     target_c is None
                     and local_sec not in ("excluded", "other_person")
+                    and len(lines) == 1
+                    and fm.can_write_after_label(dec.field_key, txt, right_c.get("text", "") if right_c is not None else None)
+                    and not fm.in_cell_blocked(txt, c["row"], c["col"], [
+                        (x["row"], x["col"], x.get("row_span", 1), x.get("text", "")) for x in cells])
+                ):
+                    target_c = c
+                    target_para_idx = 0
+                    edit_mode = "append"
+                    template_text = txt.strip() + " "
+                if (
+                    target_c is None
+                    and local_sec not in ("excluded", "other_person")
                     and rs >= 2
                     and len(lines) == 1
                     and right_c is None
@@ -979,10 +1010,18 @@ def plan_hwp_fills(doc_dump: dict[str, Any], profile: dict[str, str] | None = No
                     target_para_idx = 1
                     edit_mode = "add_para"
 
+                if target_c is not None and fm.parent_rows(c["row"], c["col"], [
+                        (x["row"], x["col"], x.get("row_span", 1), x.get("text", "")) for x in cells]):
+                    report["skipped_fields"].append({
+                        "label": txt.replace("\n", " "), "location": f"T{t_idx}({c['row']},{c['col']})",
+                        "reason": "parent_rows",
+                    })
+                    continue
                 if target_c is None:
                     report["skipped_fields"].append({
                         "label": txt.replace("\n", " "), "location": f"T{t_idx}({c['row']},{c['col']})",
                         "reason": "non_empty_adjacent_cell" if right_c is not None else "no_adjacent_target_cell",
+                        "adjacent": (right_c.get("text", "") if right_c is not None else "")[:40],
                     })
                     continue
 
@@ -996,6 +1035,9 @@ def plan_hwp_fills(doc_dump: dict[str, Any], profile: dict[str, str] | None = No
                     continue
 
                 fit_sample_text = dec.value or ""
+                if template_text:
+                    fit_sample_text = (f"{fit_sample_text}   {template_text}" if edit_mode == "prepend_trim_spaces"
+                                       else f"{template_text} {fit_sample_text}")
                 if extra_phone_anchor is not None:
                     fit_sample_text = f"{dec.value or ''} {extra_phone_anchor[0]} {extra_phone_anchor[1]} )"
                 fits, fit_pt, fit_sp, changed = _fit_cell_style(
@@ -1077,5 +1119,54 @@ def plan_hwp_fills(doc_dump: dict[str, Any], profile: dict[str, str] | None = No
                             "section": "applicant",
                         })
 
+    # 부·모처럼 나뉜 줄의 칸은 어느 경로로 계획됐든 빼고 직접 작성으로 남긴다.
+    tables = doc_dump.get("tables", [])
+
+    def _in_parent_rows(t_idx: int, row: int, col: int) -> bool:
+        if not 0 <= t_idx < len(tables):
+            return False
+        return fm.parent_rows(row, col, [(x["row"], x["col"], x.get("row_span", 1), x.get("text", ""))
+                                         for x in tables[t_idx].get("cells", [])])
+
+    def _band_head(t_idx: int, row: int, col: int) -> dict | None:
+        cells = tables[t_idx].get("cells", []) if 0 <= t_idx < len(tables) else []
+        return next((x for x in cells if x["col"] == 0 and x["col"] < col
+                     and x["row"] <= row < x["row"] + max(1, x.get("row_span", 1))), None)
+
+    def _roster_row(t_idx: int, row: int, col: int) -> bool:
+        cells = tables[t_idx].get("cells", []) if 0 <= t_idx < len(tables) else []
+        return any(x["col"] < col and x["row"] <= row < x["row"] + max(1, x.get("row_span", 1))
+                   and re.fullmatch(r"연번|순번|번호|no\.?", fm.normalize_label(x.get("text", "")), re.I) for x in cells)
+
+    dropped: dict[tuple[int, int, int], str] = {}
+    for e in cell_edits:
+        pos = (e["table_index"], e["row"], e["col"])
+        if _in_parent_rows(*pos):
+            dropped[pos] = "parent_rows"
+        elif _roster_row(*pos):
+            dropped[pos] = "roster_row"
+    # 같은 구역 머리(예: '신청인(농업인)') 안에서 같은 항목이 또 나오면 여러 사람 칸이다. 첫 칸만 남긴다.
+    seen_band: set[tuple[int, str, int]] = set()
+    for e in cell_edits:
+        head = _band_head(e["table_index"], e["row"], e["col"])
+        # 연락처(집·휴대폰)와 주소(주민등록지·실거주지)는 한 사람에게 칸이 둘인 경우가 많아 제외한다.
+        if (head is None or not str(e.get("field_key", "")).startswith("applicant.")
+                or e.get("field_key") in ("applicant.phone", "applicant.address") or e.get("mode") == "after_anchor"):
+            continue
+        key = (e["table_index"], e["field_key"], head["cell_idx"])
+        if key in seen_band:
+            dropped.setdefault((e["table_index"], e["row"], e["col"]), "repeated_in_band")
+        seen_band.add(key)
+    if dropped:
+        cell_edits[:] = [e for e in cell_edits if (e["table_index"], e["row"], e["col"]) not in dropped]
+        kept = []
+        for f in report["filled_fields"]:
+            m = re.match(r"T(\d+)\((\d+),(\d+)\)", f.get("location", ""))
+            if m and tuple(map(int, m.groups())) in dropped:
+                report["skipped_fields"].append({"label": f.get("label", ""), "location": f["location"],
+                                                 "reason": dropped[tuple(map(int, m.groups()))]})
+            else:
+                kept.append(f)
+        report["filled_fields"] = kept
     report["filled_count"] = len(report["filled_fields"])
     return {"cell_edits": cell_edits, "para_edits": para_edits, "report": report}

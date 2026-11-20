@@ -16,6 +16,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+import field_format
 import fill_hwp_plan as hwp_plan
 import form_matcher as fm
 
@@ -44,6 +45,17 @@ def _resolve_hwplib_runtime(hwplib_dir: Path | None = None) -> tuple[str, Path, 
     return None
 
 
+def _dump_text(node: Any) -> str:
+    """inspect 결과에 든 글자를 모은다(날짜·전화 표기 감지용)."""
+    if isinstance(node, str):
+        return node
+    if isinstance(node, dict):
+        return "\n".join(_dump_text(v) for v in node.values())
+    if isinstance(node, list):
+        return "\n".join(_dump_text(v) for v in node)
+    return ""
+
+
 def _safe_inspect_tag(stderr: str) -> str:
     """inspect(개인정보 미포함) 실패 요약 태그를 짧게 뽑는다."""
     for ln in (stderr or "").splitlines():
@@ -59,7 +71,9 @@ def fill_hwp_bytes(
     *,
     timeout_sec: int = 20,
     hwplib_dir: Path | None = None,
+    styles: dict[str, str] | None = None,
 ) -> tuple[bytes, dict[str, Any]]:
+    """styles를 주면 서류에서 표기를 읽는 대신 그 표기를 쓴다(좁은 칸 재시도용)."""
     prof = fm.default_profile() if profile is None else profile
     base_report: dict[str, Any] = {
         "format": "hwp",
@@ -119,7 +133,19 @@ def fill_hwp_bytes(
             base_report["error"] = "hwplib_inspect_invalid_json"
             return data, base_report
 
-        plan = hwp_plan.plan_hwp_fills(doc_dump, prof)
+        # 이 서류에 쓰인 날짜·전화 표기를 따른다.
+        dump_text = _dump_text(doc_dump)
+        styles = styles or field_format.detect_document_styles(dump_text)
+        if fm.BENEFICIARY_IS_APPLICANT.get() is None:
+            token = fm.BENEFICIARY_IS_APPLICANT.set(fm.beneficiary_is_applicant(dump_text))
+        else:
+            token = None
+        base_report["formats"] = styles
+        try:
+            plan = hwp_plan.plan_hwp_fills(doc_dump, field_format.adapt_profile(prof, styles))
+        finally:
+            if token is not None:
+                fm.BENEFICIARY_IS_APPLICANT.reset(token)
         rep = plan["report"]
         base_report.update({
             "found_labels": rep["found_labels"],

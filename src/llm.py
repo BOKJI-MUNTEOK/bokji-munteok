@@ -7,6 +7,7 @@ OpenAI 호환 Chat Completions API를 표준 라이브러리로 부른다.
 import json
 import hashlib
 import os
+import urllib.error
 import urllib.request
 from functools import lru_cache
 from pathlib import Path
@@ -20,6 +21,8 @@ ROOT = Path(__file__).resolve().parent.parent
 CACHE = ROOT / "data" / "ai_cache"
 EXTRACT_PROMPT = (ROOT / "prompts" / "extract.txt").read_text(encoding="utf-8")
 EASY_PROMPT = (ROOT / "prompts" / "easy.txt").read_text(encoding="utf-8")
+# 화면에서 즉석으로 만드는 짧은 요약(평가·캐시용 EASY_PROMPT와 따로 둔다)
+EASY_SHORT_PROMPT = (ROOT / "prompts" / "easy_short.txt").read_text(encoding="utf-8")
 MODEL = os.environ.get("LLM_MODEL", "gpt-5.6-luna")
 BASE = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1").rstrip("/")
 
@@ -58,7 +61,8 @@ def easy_text(easy: dict) -> str:
     return "\n".join([easy["who"], *easy["conditions"], easy["what"], *easy["steps"]])
 
 
-def _chat(system: str, user: str, schema: dict, name: str) -> dict:
+def _chat(system: str, user: str, schema: dict, name: str, reasoning_effort: str | None = None) -> dict:
+    """reasoning_effort('low' 등)를 주면 빠르게 답한다. 모델이 지원하지 않으면 옵션 없이 다시 요청한다."""
     key = os.environ.get("LLM_API_KEY") or os.environ.get("OPENAI_API_KEY")
     if not key:
         raise RuntimeError(".env에 LLM_API_KEY를 넣으세요")
@@ -67,10 +71,17 @@ def _chat(system: str, user: str, schema: dict, name: str) -> dict:
         "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
         "response_format": {"type": "json_schema", "json_schema": {"name": name, "strict": True, "schema": schema}},
     }
+    if reasoning_effort:
+        body["reasoning_effort"] = reasoning_effort
     req = urllib.request.Request(f"{BASE}/chat/completions", data=json.dumps(body).encode(),
                                  headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"})
-    with urllib.request.urlopen(req, timeout=120) as r:
-        data = json.load(r)
+    try:
+        with urllib.request.urlopen(req, timeout=120) as r:
+            data = json.load(r)
+    except urllib.error.HTTPError as exc:
+        if reasoning_effort and exc.code == 400:
+            return _chat(system, user, schema, name)
+        raise
     return json.loads(data["choices"][0]["message"]["content"])
 
 
@@ -89,6 +100,13 @@ def make_easy(svc: dict, retries: int = 1) -> dict:
             break
         user = src + "\n\n[다시 쓰기] 앞 답에서 다음 숫자가 빠졌어요. 모두 넣어 다시 써 주세요: " + ", ".join(chk["missing"])
     return {"easy": easy, "check": chk, "attempts": attempt + 1, "needs_review": not chk["ok"]}
+
+
+def make_easy_short(svc: dict) -> dict:
+    """화면용 짧은 쉬운 설명. 빠르게(추론 강도 none, 재시도 없음) 만든다. 숫자 검사는 결과만 돌려준다."""
+    src = source_text(svc)
+    easy = _chat(EASY_SHORT_PROMPT, src, EASY_SCHEMA, "easy_short", reasoning_effort="none")
+    return {"easy": easy, "check": numcheck.check(src, easy_text(easy)), "short": True}
 
 
 def run(svc: dict, force: bool = False) -> dict:

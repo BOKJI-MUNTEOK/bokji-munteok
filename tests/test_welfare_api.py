@@ -123,7 +123,7 @@ class TestLiveCatalogApp(unittest.TestCase):
         at = AppTest.from_string(script, default_timeout=30).run()
         self.assertFalse(at.exception, at.exception)
         self.assertEqual(sum(b.label == "신청 방법 보기" for b in at.button), 24)
-        at.number_input(key="all_page").set_value(4).run()
+        at.number_input(key="all_noform_page").set_value(4).run()  # 첨부 없는 서비스는 "신청서 파일 없음" 탭
         self.assertFalse(at.exception, at.exception)
         self.assertEqual(sum(b.label == "신청 방법 보기" for b in at.button), 1)
         self.api.detail.assert_not_called()
@@ -142,7 +142,7 @@ class TestLiveCatalogApp(unittest.TestCase):
         self.api.detail.return_value = svc
         script = f"import runpy\napp = runpy.run_path({str(ROOT / 'app.py')!r})\napp['browse']()"
         at = AppTest.from_string(script, default_timeout=30).run()
-        at.button(key="all_C0").click().run()
+        at.button(key="all_noform_C0").click().run()
         self.assertFalse(at.exception, at.exception)
         self.assertFalse(at.error, at.error)
         self.api.detail.assert_called_once()
