@@ -153,9 +153,12 @@ def search_juso(keyword: str, *, opener=None, limit: int = 5) -> list[dict] | No
             data = json.load(r)
         common = data["results"]["common"]
         if common.get("errorCode") != "0":
+            # 운영 로그에서 원인을 볼 수 있게 오류 코드만 남긴다(주소·키는 남기지 않는다).
+            print(f"[juso] errorCode={common.get('errorCode')}", flush=True)
             return None
         rows = data["results"].get("juso") or []
-    except Exception:
+    except Exception as exc:
+        print(f"[juso] {type(exc).__name__}: {str(exc)[:80].replace(key, '***')}", flush=True)
         return None
     return [{"road": str(j.get("roadAddrPart1") or j.get("roadAddr") or "").strip(),
              "jibun": str(j.get("jibunAddr") or "").strip(),
