@@ -131,19 +131,26 @@ def welfare_client():
     return WelfareAPI()
 
 
-@st.cache_data(ttl=300, show_spinner="공식 복지서비스 목록을 불러오고 있어요")
+@st.cache_resource(ttl=300, max_entries=1, show_spinner="공식 복지서비스 목록을 불러오고 있어요")
 def services():
+    # 공개 자료만 공유한다. 화면에서는 이 목록을 수정하지 않으며 사용자 입력은 세션에 둔다.
     return welfare_client().catalog()
 
 
-@st.cache_data(max_entries=8, show_spinner=False)
+@st.cache_resource(max_entries=2, show_spinner=False)
 def scored_rows(weights, version, _services):
-    """공개 자료의 버전과 가중치로 캐시한다. 큰 원문 목록은 매번 해시하지 않는다."""
+    """읽기 전용 공개 결과를 공유하고, 버전 변경 때도 항목별 분석은 재사용한다."""
     return build(weights, "규칙", _services)
 
 
 def updated_time(timestamp):
     return datetime.fromtimestamp(timestamp, timezone(timedelta(hours=9))).strftime("%Y-%m-%d %H:%M")
+
+
+def catalog_checked_at(catalog):
+    states = catalog.get("sync", {}).get("sources", {}).values()
+    return min((row.get("catalog_checked_at") or row.get("catalog_at") or catalog["updated_at"]
+                for row in states), default=catalog["updated_at"])
 
 
 def online_status(r):
@@ -173,8 +180,9 @@ W = st.session_state.W
 try:
     CATALOG = services()
     SV = welfare_client().services(CATALOG)
-    version = (CATALOG.get("sync", {}).get("revision"), CATALOG["updated_at"])
+    version = CATALOG.get("sync", {}).get("revision", CATALOG["updated_at"])
     ROWS = scored_rows(W, version, SV)
+    CHECKED_AT = catalog_checked_at(CATALOG)
 except (APIError, StoreError) as e:
     fail(str(e))
     st.stop()
@@ -188,6 +196,13 @@ def sync_status(state):
         row = state["sources"][source]
         st.caption(f"{name} 분석 저장 {row['ready']:,}/{row['total']:,}건")
     st.caption("매일 00·06·12·18시(한국시간)에 자동 갱신합니다. 저장된 자료를 표시하고 있어요.")
+    sources = state["sources"]
+    if all(all(key in row for key in ("added", "changed", "removed")) for row in sources.values()):
+        added, changed, removed = (sum(row[key] for row in sources.values())
+                                   for key in ("added", "changed", "removed"))
+        st.caption(f"최근 목록 변경: 추가 {added:,}건 · 수정 {changed:,}건 · 삭제 {removed:,}건",
+                   help="중앙부처·지자체의 최근 정상 목록 확인에서 발견한 변경 건수입니다. "
+                        "상세 조회·분석이 완료된 건수는 위의 ‘분석 저장’에서 확인할 수 있어요.")
 
 
 if CATALOG.get("sync"):
@@ -980,7 +995,7 @@ def guide():
 신청서·위임장 빈칸 채우기, 작성 결과 미리보기·개별 저장·인쇄, 서류 발급처 안내. 접수 대행은 하지 않습니다.
 """)
     st.caption(f"자료: 한국사회보장정보원 복지서비스 API(공공데이터포털, 중앙부처 15090532 · 지자체 15108347) "
-               f"목록 {len(SV):,}건 · 조회 {updated_time(CATALOG['updated_at'])} (한국시간)")
+               f"목록 {len(SV):,}건 · 조회 {updated_time(CHECKED_AT)} (한국시간)")
 
 
 FIND = st.Page(mine, title="내 복지 찾기", icon=":material/person_search:", url_path="find")
@@ -991,7 +1006,7 @@ nav = st.navigation({"시민용": [st.Page(home, title="홈", icon=":material/ho
 st.logo(str(LOGO / "mark.svg"), size="large", icon_image=str(LOGO / "mark.svg"))  # 이름은 아래 CSS로 본문과 같은 글꼴로 붙인다
 with st.sidebar:
     st.caption(f"공식 목록 {len(SV):,}건 · 중앙 {CATALOG['counts']['central']:,} · 지자체 {CATALOG['counts']['local']:,}\n\n"
-               f"목록 조회: {updated_time(CATALOG['updated_at'])}\n\n입력한 내용은 저장하지 않아요.")
+               f"목록 조회: {updated_time(CHECKED_AT)}\n\n입력한 내용은 저장하지 않아요.")
 try:
     nav.run()
     st.markdown(f"<div class='site-foot'>{GOV_NOTICE}<br>자료: 한국사회보장정보원 복지서비스 API(공공데이터포털)</div>",

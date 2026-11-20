@@ -1,5 +1,8 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": "container",
-  "regions": ["icn1"]
+  "regions": ["icn1"],
+  "git": {
+    "deploymentEnabled": false
+  }
 }

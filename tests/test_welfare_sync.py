@@ -23,7 +23,7 @@ from pipeline import build
 import llm
 from parse import load_all
 from welfare_api import APIError, DataClient, QuotaExceeded, WelfareAPI, api_keys
-from welfare_store import StoreError, WelfareStore, key_id, sync_slot, today
+from welfare_store import StoreError, WelfareStore, detail_id, key_id, sync_slot, today
 from welfare_sync import main, sync
 from test_welfare_api import listing, detail_xml
 
@@ -109,6 +109,156 @@ class TestMongoSync(unittest.TestCase):
         self.assertFalse(self.store.service("local", "L2")["detail_loaded"])
         self.assertIsNone(self.store.service("local", "L3"))
         self.assertEqual(self.store.progress(self.keys)["sources"]["local"]["ready"], 1)
+
+    def test_unchanged_catalog_only_updates_check_state(self):
+        first = items(["L1", "L2"])
+        self.publish(first)
+        self.publish([], "central")
+        self.save(first[0])
+        before = self.store.snapshot()
+        state = self.store.source_state("local")
+        documents = list(self.store.db.catalog.find())
+        self.store.state("local", "error", "이전 오류", retry_at=123)
+        with patch("welfare_store.time.time", return_value=time.time() + 60):
+            changes = self.store.publish_catalog("local", list(reversed(first)), "test-owner", slot="next-slot")
+        after = self.store.snapshot()
+        updated = self.store.source_state("local")
+        self.assertEqual(changes, {"added": 0, "changed": 0, "removed": 0})
+        self.assertEqual(list(self.store.db.catalog.find()), documents)
+        self.assertEqual(after["sync"]["revision"], before["sync"]["revision"])
+        self.assertEqual(after["updated_at"], before["updated_at"])
+        self.assertEqual(updated["generation"], state["generation"])
+        self.assertEqual(updated["previous_generation"], state["previous_generation"])
+        self.assertEqual(updated["catalog_at"], state["catalog_at"])
+        self.assertGreater(updated["catalog_checked_at"], state["catalog_checked_at"])
+        self.assertEqual(updated["catalog_slot"], "next-slot")
+        self.assertEqual((updated["status"], updated["note"], updated["retry_at"]), ("collecting", "", 0))
+        self.assertEqual([s["servId"] for s in self.store.pending("local")], ["L2"])
+
+    def test_unchanged_catalog_still_requires_live_owner_lease(self):
+        self.publish([self.local])
+        before = self.store.source_state("local")
+        with self.assertRaises(StoreError):
+            self.store.publish_catalog("local", [self.local], "other-owner", slot="wrong")
+        self.store.db.meta.update_one({"_id": "sync"}, {"$set": {"expires": 0}})
+        with self.assertRaises(StoreError):
+            self.store.publish_catalog("local", [self.local], "test-owner", slot="expired")
+        self.assertEqual(self.store.source_state("local"), before)
+
+    def test_empty_catalog_is_published_once_and_deletion_removes_active_services(self):
+        self.publish([])
+        empty = self.store.source_state("local")
+        self.assertTrue(empty["generation"])
+        revision = self.store.revision()
+        self.publish([])
+        self.assertEqual(self.store.revision(), revision)
+        self.assertEqual(self.store.source_state("local")["generation"], empty["generation"])
+        self.publish([self.local])
+        self.save(self.local)
+        before = self.store.snapshot()
+        self.assertEqual(self.publish([]), {"added": 0, "changed": 0, "removed": 1})
+        after = self.store.snapshot(previous=before)
+        self.assertEqual(after["services"], [])
+        self.assertEqual(after["counts"]["local"], 0)
+        self.assertIsNone(self.store.service("local", "L1"))
+        self.assertGreater(after["sync"]["revision"], before["sync"]["revision"])
+
+    def test_unchanged_checks_clean_old_unpublished_generations(self):
+        self.publish([self.local])
+        active = self.store.source_state("local")["generation"]
+        self.store.db.catalog.insert_one({"_id": "orphan", "source": "local", "generation": "aborted",
+                                          "created_at": time.time() - 3 * 86400})
+        self.publish([self.local])
+        self.assertIsNone(self.store.db.catalog.find_one({"_id": "orphan"}))
+        self.assertEqual(self.store.db.catalog.count_documents({"generation": active}), 1)
+
+    def test_snapshot_refreshes_notices_without_reading_unchanged_documents(self):
+        self.publish([self.local])
+        self.save(self.local)
+        before = self.store.snapshot()
+        self.store.state("local", "quota", "오늘 호출 한도에 도달했습니다.")
+        meta = self.store.metadata()
+        with patch.object(self.store.db.catalog, "find") as catalog, \
+                patch.object(self.store.db.details, "find") as details, \
+                patch.object(self.store, "metadata") as metadata:
+            after = self.store.snapshot(previous=before, meta=meta)
+        for mock in (catalog, details, metadata):
+            mock.assert_not_called()
+        self.assertIs(after["services"], before["services"])
+        self.assertEqual(after["sync"]["sources"]["local"]["status"], "quota")
+        self.assertEqual(after["warnings"], ["오늘 호출 한도에 도달했습니다."])
+        self.assertEqual(before["warnings"], [])
+        self.assertEqual(after["updated_at"], before["updated_at"])
+
+    def test_snapshot_only_reads_new_or_changed_details(self):
+        first = items(["L1", "L2", "L3"])
+        self.publish(first)
+        for item in first:
+            self.save(item)
+        before = self.store.snapshot()
+        changed = {**first[1], "list_hash": "changed", "summary": "변경"}
+        added = items(["L4"])[0]
+        self.publish([first[0], changed, added])
+        for item in (changed, added):
+            self.save(item)
+        with patch.object(self.store.db.details, "find", wraps=self.store.db.details.find) as details:
+            after = self.store.snapshot(previous=before)
+        details.assert_called_once()
+        self.assertEqual(set(details.call_args.args[0]["_id"]["$in"]), {detail_id(changed), detail_id(added)})
+        result = {s["servId"]: s for s in after["services"]}
+        self.assertEqual(set(result), {"L1", "L2", "L4"})
+        self.assertIs(result["L1"], next(s for s in before["services"] if s["servId"] == "L1"))
+        self.assertEqual(result["L2"]["list_hash"], "changed")
+        self.assertEqual(after["sync"]["sources"]["local"]["ready"], 3)
+        self.assertEqual({s["servId"] for s in before["services"]}, {"L1", "L2", "L3"})
+
+    def test_newly_saved_detail_reuses_existing_catalog(self):
+        first = items(["L1", "L2"])
+        self.publish(first)
+        self.save(first[0])
+        before = self.store.snapshot()
+        self.save(first[1])
+        with patch.object(self.store.db.catalog, "find") as catalog, \
+                patch.object(self.store.db.details, "find", wraps=self.store.db.details.find) as details:
+            after = self.store.snapshot(previous=before)
+        catalog.assert_not_called()
+        details.assert_called_once_with({"_id": {"$in": [detail_id(first[1])]}})
+        self.assertEqual(after["sync"]["sources"]["local"]["ready"], 2)
+        self.assertEqual(before["sync"]["sources"]["local"]["ready"], 1)
+
+    def test_changed_listing_cannot_reuse_old_detail_while_new_detail_is_pending(self):
+        self.publish([self.local])
+        self.save(self.local)
+        before = self.store.snapshot()
+        changed = {**self.local, "list_hash": "new", "summary": "새 대상"}
+        self.publish([changed])
+        after = self.store.snapshot(previous=before)
+        self.assertFalse(after["services"][0]["detail_loaded"])
+        self.assertNotIn("stored_analysis", after["services"][0])
+        self.assertEqual(after["sync"]["sources"]["local"]["ready"], 0)
+        self.assertTrue(before["services"][0]["detail_loaded"])
+
+    def test_snapshot_uses_captured_catalog_generation_during_concurrent_publish(self):
+        self.publish([self.local])
+        self.save(self.local)
+        captured = self.store.metadata()
+        added = items(["L2"])[0]
+        self.publish([added])
+        self.save(added)
+        before = self.store.snapshot(meta=captured)
+        self.assertEqual([s["servId"] for s in before["services"]], ["L1"])
+        self.assertEqual(before["sync"]["revision"], captured["revision"])
+        after = self.store.snapshot(previous=before, meta=self.store.metadata())
+        self.assertEqual([s["servId"] for s in after["services"]], ["L2"])
+        self.assertGreater(after["sync"]["revision"], before["sync"]["revision"])
+
+    def test_public_metadata_excludes_lock_and_unknown_fields(self):
+        self.publish([self.local])
+        self.store.db.meta.update_one({"_id": "sync"}, {"$set": {"sources.local.internal_token": "private"}})
+        meta = self.store.metadata()
+        self.assertEqual(set(meta), {"revision", "sources"})
+        self.assertNotIn("internal_token", meta["sources"]["local"])
+        self.assertNotIn("test-owner", str(meta))
 
     def test_partial_database_write_does_not_publish_or_delete(self):
         self.publish([self.local])
@@ -258,14 +408,17 @@ class TestMongoSync(unittest.TestCase):
     def test_unchanged_revision_reuses_database_snapshot(self):
         self.publish([self.local])
         api = WelfareAPI("mongodb://test")
-        with patch.object(WelfareStore, "snapshot", autospec=True,
-                side_effect=WelfareStore.snapshot) as snapshot:
+        with patch.object(self.store.db.catalog, "find", wraps=self.store.db.catalog.find) as catalog, \
+                patch.object(self.store.db.details, "find", wraps=self.store.db.details.find) as details:
             api.catalog()
             api.catalog()
-            self.assertEqual(snapshot.call_count, 1)
+            self.assertEqual((catalog.call_count, details.call_count), (1, 1))
+            self.store.state("local", "quota", "오늘 호출 한도")
+            self.assertEqual(api.catalog()["warnings"], ["오늘 호출 한도"])
+            self.assertEqual((catalog.call_count, details.call_count), (1, 1))
             self.save(self.local)
-            api.catalog()
-            self.assertEqual(snapshot.call_count, 2)
+            self.assertTrue(api.catalog()["services"][0]["detail_loaded"])
+            self.assertEqual((catalog.call_count, details.call_count), (1, 2))
 
     def test_four_schedules_use_korean_time(self):
         midnight = datetime(2026, 11, 17, 15, tzinfo=timezone.utc).timestamp()
@@ -283,10 +436,15 @@ class TestMongoSync(unittest.TestCase):
             return merge_detail(item, detail_xml())
         with patch.object(DataClient, "catalog", autospec=True, side_effect=catalog) as cat, \
                 patch.object(DataClient, "detail", autospec=True, side_effect=detail) as dtl:
+            first_revision = None
             for hour in (0, 6, 12, 18):
                 with patch("welfare_sync.sync_slot", return_value=f"{today()}T{hour:02d}"):
                     sync("mongodb://test", self.keys)
                     sync("mongodb://test", self.keys)  # 같은 구간 수동 재실행
+                if first_revision is None:
+                    first_revision = self.store.revision()
+                self.assertEqual(self.store.revision(), first_revision)
+                self.assertEqual(self.store.db.catalog.count_documents({}), 1)
             self.assertEqual(cat.call_count, 8)
             self.assertEqual(dtl.call_count, 1)
         self.assertEqual(self.store.remaining("central", self.keys), 296)
