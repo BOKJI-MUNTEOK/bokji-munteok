@@ -807,7 +807,10 @@ def mine():
         mode = st.segmented_control("방법", list(MODES), key="mode", label_visibility="collapsed", width="stretch",
                                     format_func=MODES.get)
         if mode == "상담으로 찾기":
-            ai_chat() if chat_ai.available() else chat()
+            if chat_ai.available():  # 삼항식 한 줄로 쓰면 Streamlit 매직이 반환값 None을 화면에 찍는다
+                ai_chat()
+            else:
+                chat()
         else:
             steps()
     with right, st.container(key="quick"):
