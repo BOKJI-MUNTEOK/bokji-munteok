@@ -579,7 +579,8 @@ def _match_label(
         return _fill_or_skip(prof, key, "matched_name", eff_section)
 
     # 8. 생년월일
-    if norm in ("생년월일", "출생연월일", "출생년월일", "신청인생년월일"):
+    # '생년월일(nps번호)'처럼 생년월일 대신 적을 수 있는 번호가 괄호로 붙은 칸도 생년월일 칸이다.
+    if re.fullmatch(r"(?:신청인)?(?:생년월일|출생연월일|출생년월일)(?:nps번호|국민연금번호|가입자번호)?", norm, re.I):
         if eff_section == "proxy":
             return MatchDecision("skip", reason="no_proxy_birth_date_in_profile", section=eff_section)
         return _fill_or_skip(prof, "applicant.birth_date", "matched_birth_date", eff_section)

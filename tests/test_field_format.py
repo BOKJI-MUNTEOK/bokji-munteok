@@ -120,6 +120,14 @@ class LabelHints(unittest.TestCase):
         rrn = form_matcher.match_label("주민등록번호(외국인등록번호)", profile=prof)
         self.assertEqual((rrn.action, rrn.value), ("fill", "500101-1234567"))
 
+    def test_birth_label_with_alternate_number_note(self):
+        # 국민연금 노후긴급자금 대부 신청서의 신청자 칸 '생년월일(nps번호)'
+        prof = {"applicant.birth_date": "1957년 12월 31일"}
+        for label in ("생년월일(nps번호)", "생년월일(NPS번호)", "생년월일 (가입자번호)"):
+            d = form_matcher.match_label(label, profile=prof)
+            self.assertEqual((d.action, d.field_key, d.value), ("fill", "applicant.birth_date", "1957년 12월 31일"), label)
+        self.assertEqual(form_matcher.match_label("생년월일(nps번호)", section="proxy", profile=prof).action, "skip")
+
     def test_hint_never_invents_missing_value(self):
         d = form_matcher.match_label("생년월일(YYYYMMDD)", profile={"applicant.name": "가"})
         self.assertEqual(d.action, "skip")
