@@ -11,10 +11,15 @@ FOR_CHILD = {"영유아", "아동", "청소년", "임신·출산"}
 
 
 def age_range(text: str) -> tuple[int | None, int | None]:
-    """지원대상 글의 'N세 이상'은 가장 작은 값, 'N세 이하/미만'은 가장 큰 값을 범위로 본다."""
+    """지원대상 글의 'N세 이상'은 가장 작은 값, 'N세 이하/미만'은 가장 큰 값을 범위로 본다.
+    이상이 이하보다 크면('① 30세 이상 … ④ 30세 미만'처럼 예외를 나눠 적었거나 청소년·어르신을 함께 적은 글)
+    아무도 못 받는 범위가 되므로 나이로 거르지 않는다."""
     lo = [int(n) for n in re.findall(r"(\d{1,3})\s*세\s*이상", text)]
     hi = [int(n) - (u == "미만") for n, u in re.findall(r"(\d{1,3})\s*세\s*(이하|미만)", text)]
-    return (min(lo) if lo else None), (max(hi) if hi else None)
+    lo, hi = (min(lo) if lo else None), (max(hi) if hi else None)
+    if lo is not None and hi is not None and lo > hi:
+        return None, None
+    return lo, hi
 
 
 def match(svc: dict, sido: str = "", sgg: str = "", life=(), groups=(), themes=(), age=None) -> list[str] | None:
