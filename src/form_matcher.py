@@ -600,7 +600,9 @@ def _match_label(
         return _fill_or_skip(prof, key, "matched_phone", eff_section)
 
     # 11. 주소 / 거주지
-    if norm in ("주소", "현주소", "거주지", "주민등록상주소", "주민등록주소", "주민등록지", "신청인주소"):
+    # '주 소 (주민등록상)'처럼 칸 이름 뒤에 어느 주소인지 괄호로 적은 경우도 같은 주소 칸이다.
+    if norm in ("주소", "현주소", "거주지", "주민등록상주소", "주민등록주소", "주민등록지", "신청인주소",
+                "주소주민등록상", "주소주민등록지", "주소현거주지", "주소실거주지", "주소도로명", "주소도로명주소"):
         if eff_section == "proxy":
             return MatchDecision("skip", reason="no_proxy_address_in_profile", section=eff_section)
         return _fill_or_skip(prof, "applicant.address", "matched_address", eff_section)

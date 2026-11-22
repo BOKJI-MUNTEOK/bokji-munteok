@@ -148,6 +148,20 @@ class Juso(unittest.TestCase):
         self.assertNotIn("%3C", opener.urls[0])
 
 
+    def test_connection_failure_is_remembered_so_users_do_not_wait_again(self):
+        def timeout(url, timeout=0):
+            raise TimeoutError("timed out")
+        with patch.dict(os.environ, {"JUSO_API_KEY": "test-key"}), patch("address_check.load_env"), \
+                patch.object(ac, "_server_down_until", 0.0):
+            with patch("urllib.request.urlopen", side_effect=timeout) as urlopen:
+                self.assertEqual(ac._search("서울 강남구", None, 5), (None, True))
+                self.assertEqual(ac._search("서울 강남구", None, 5), (None, True))
+            self.assertEqual(urlopen.call_count, 1)
+            self.assertGreater(ac._server_down_until, 0)
+            # API가 오류로 답한 것은 연결 문제가 아니다.
+            self.assertEqual(ac._search("서울 강남구", juso_reply([], code="E0001"), 5), (None, False))
+
+
 class Check(unittest.TestCase):
     def test_without_keys_gives_local_tidy_and_says_so(self):
         with patch.dict(os.environ, NO_KEYS), patch("address_check.load_env"), \
@@ -225,3 +239,70 @@ class Check(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def browser_reply(rows, keyword):
+    """브라우저가 setStateValue로 돌려주는 값: 도로명주소 API 응답 JSON 그대로."""
+    body = json.loads(juso_reply(rows)("").read())
+    return {"keyword": keyword, "data": body, "error": ""}
+
+
+def unreachable(url, timeout=0):
+    raise OSError("timed out")
+
+
+class BrowserSearch(unittest.TestCase):
+    """해외 서버에서 도로명주소 API가 막히면 사용자 브라우저에서 찾는다."""
+
+    def setUp(self):
+        patch.dict(os.environ, {"LLM_API_KEY": "", "OPENAI_API_KEY": "", "JUSO_API_KEY": "test-key"}).start()
+        patch("address_check.load_env").start()
+        self.addCleanup(patch.stopall)
+
+    def test_unreachable_server_asks_browser_and_keeps_detail(self):
+        r = ac.check("서울강남구테헤란로123 101동202호", opener=unreachable)
+        self.assertEqual(r["browser_search"], [{"keyword": "서울특별시 강남구 테헤란로 123", "detail": "101동 202호"}])
+        self.assertIn(ac.NOTE_NO_JUSO, r["notes"])
+        req = ac.browser_request(r)
+        self.assertEqual((req["url"], req["key"], req["keywords"]), (ac.JUSO_URL, "test-key", ["서울특별시 강남구 테헤란로 123"]))
+        done = ac.apply_browser_result(r, browser_reply(["서울특별시 강남구 테헤란로 123"], "서울특별시 강남구 테헤란로 123"))
+        self.assertNotIn("browser_search", done)
+        self.assertTrue(done["verified"] and done["juso_used"])
+        self.assertEqual(done["suggestion"], "서울특별시 강남구 테헤란로 123 101동 202호")
+        self.assertEqual(done["notes"], [])
+
+    def test_browser_uses_same_matching_rules(self):
+        r = ac.check("테헤란로 1", opener=unreachable)
+        done = ac.apply_browser_result(r, browser_reply(["서울특별시 강남구 테헤란로 1-2", "서울특별시 강남구 테헤란로 10"],
+                                                        "테헤란로 1"))
+        self.assertFalse(done["verified"])
+        self.assertTrue(any("똑같은 주소는 없어요" in n for n in done["notes"]))
+        done = ac.apply_browser_result(r, browser_reply([], "테헤란로 1"))
+        self.assertTrue(any("찾지 못했습니다" in n for n in done["notes"]))
+
+    def test_ai_keyword_then_local_keyword(self):
+        chat = lambda *a: {"is_address": True, "corrected": "서울특별시 강남구 테헤란로 123", "road_keyword": "강남구 테헤란로 123",
+                           "detail": "", "changed": True}
+        r = ac.check("서울강남구테헤란로 123 101동", chat=chat, opener=unreachable)
+        self.assertEqual([t["keyword"] for t in r["browser_search"]], ["강남구 테헤란로 123", "서울특별시 강남구 테헤란로 123"])
+        done = ac.apply_browser_result(r, browser_reply(["서울특별시 강남구 테헤란로 123"], "서울특별시 강남구 테헤란로 123"))
+        self.assertEqual(done["detail"], "101동")
+        self.assertTrue(done["verified"])
+
+    def test_browser_failure_or_odd_reply_keeps_honest_note(self):
+        r = ac.check("서울 강남구 테헤란로 123", opener=unreachable)
+        for reply in (None, {"keyword": "서울특별시 강남구 테헤란로 123", "data": None, "error": "TypeError"},
+                      {"keyword": "다른 검색어", "data": json.loads(juso_reply(["x 로 1"])("").read())},
+                      {"keyword": "서울특별시 강남구 테헤란로 123", "data": {"results": {"common": {"errorCode": "E0001"}}}},
+                      {"keyword": "서울특별시 강남구 테헤란로 123", "data": "not json"}):
+            done = ac.apply_browser_result(r, reply)
+            self.assertNotIn("browser_search", done)
+            self.assertFalse(done["juso_used"] or done["verified"])
+            self.assertIn(ac.NOTE_NO_JUSO, done["notes"])
+
+    def test_no_browser_search_without_key_or_on_api_error(self):
+        self.assertNotIn("browser_search", ac.check("서울 강남구 테헤란로 123", opener=juso_reply([], code="E0001")))
+        with patch.dict(os.environ, {"JUSO_API_KEY": ""}):
+            r = ac.check("서울 강남구 테헤란로 123", opener=unreachable)
+        self.assertNotIn("browser_search", r)
+        self.assertIsNone(ac.browser_request(r))

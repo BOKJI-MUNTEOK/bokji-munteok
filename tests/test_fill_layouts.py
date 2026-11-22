@@ -141,6 +141,11 @@ class Helpers(unittest.TestCase):
         self.assertEqual(fm.detect_section_context(long_statement, "keep"), "applicant")
         self.assertEqual(fm.detect_section_context("것을 요청합니다.", "keep"), "applicant")
         self.assertEqual(fm.match_label("성명(국문)", profile={"applicant.name": "가"}).action, "fill")
+        # 광양시 청년 도서구입비 신청서식: '주 소 (주민등록상)' 칸
+        prof = {"applicant.address": "전라남도 광양시 광양읍 인덕로 1100"}
+        for label in ("주    소\n(주민등록상)", "주소(현 거주지)", "주 소 (도로명주소)"):
+            self.assertEqual(fm.match_label(label, profile=prof).field_key, "applicant.address", label)
+        self.assertEqual(fm.match_label("주    소\n(주민등록상)", section="proxy", profile=prof).action, "skip")
 
     def test_decide_kind_from_content(self):
         """운영 DB 첨부 5,358개 내용 검증으로 정한 기준."""
