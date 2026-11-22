@@ -118,7 +118,7 @@ def markdown(s: dict) -> str:
     L = ["# 전체 데이터 분석 결과 (운영 DB)", "",
          f"기준: 공식 목록 {s['services']:,}건(" + " · ".join(f"{SRC.get(k, k)} {v:,}" for k, v in s["list_counts"].items())
          + f"), 상세 저장·점수 계산 {s['scored']:,}건, 미계산 {s['unscored']:,}건. 목록 갱신 {s['catalog_updated_at']}, 집계 {s['generated_at']}.",
-         "계산: 앱 분석 탭과 같은 규칙 추출과 기본 가중치(팀 확정 전 안). 재현: `python src/full_report.py`(읽기 권한 MongoDB, 외부 API·AI 호출 없음).", "",
+         "계산: 앱 분석 탭과 같은 규칙 추출과 확정 가중치. 재현: `python src/full_report.py`(읽기 권한 MongoDB, 외부 API·AI 호출 없음).", "",
          "## 1. 문턱 점수 분포", "",
          *table([{"구분": "전체", **o}, *({"구분": k, **v} for k, v in src.items())],
                 ["구분", "n", "mean", "median", "sd", "q1", "q3", "min", "max", "band_낮음", "band_보통", "band_높음"]), "",
