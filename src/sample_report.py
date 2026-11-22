@@ -107,7 +107,7 @@ def markdown(report: dict) -> str:
             mae = lambda m: f"{display(m[field + '_mae'])} ({m[field + '_mae_n']})" if field.startswith("n_") else "—"
             lines.append(f"| {evaluate.LABELS[field]} | {display(r[field])} | {display(a[field])} | {mae(r)} | {mae(a)} |")
         lines.append("")
-    lines.extend(["## 문턱 점수 분포", "", "기본 가중치(팀 결정 전 안)와 현재 상한으로 계산한 규칙 점수입니다. 서류 정보 없음은 점수에 가산하지 않으므로 실제 부담을 과소평가할 수 있습니다.", "",
+    lines.extend(["## 문턱 점수 분포", "", "확정 가중치와 상한으로 계산한 규칙 점수입니다. 서류 정보 없음은 점수에 가산하지 않으므로 실제 부담을 과소평가할 수 있습니다.", "",
                   "| 구분 | 건수 | 평균 | 중앙값 | 최솟값 | 최댓값 |", "| --- | ---: | ---: | ---: | ---: | ---: |"])
     for name, row in report["score_summary"].items():
         lines.append(f"| {name} | {row['n']} | {display(row['mean'])} | {display(row['median'])} | {display(row['min'])} | {display(row['max'])} |")
@@ -118,7 +118,7 @@ def markdown(report: dict) -> str:
                   "숫자 유지 검사 통과는 문장 의미·자격 판정·서류의 정확성을 보장하지 않습니다. 최초 시도 답변은 저장돼 있지 않아 그 내용은 재검증하지 않았습니다.", "",
                   "## 해석과 다음 작업", "",
                   "방문 필수 판단과 조건 수의 불일치 원문을 `mismatches.csv`에서 검토합니다. 이 결과만으로 AI 우수성을 단정하지 않습니다.",
-                  "조건 분리 기준과 방문의 대체 신청수단을 먼저 확정하고 규칙·프롬프트를 개선한 뒤 같은 표본으로 다시 비교합니다. 가중치는 팀 합의 전 기본 안을 유지합니다.", "",
+                  "2026-11-22 방문 필수 규칙을 정답표 기준(방문 말고 다른 신청 수단이 없을 때만)으로 고쳐 같은 표본으로 다시 비교했습니다(이전 48%). 이 50건의 불일치를 보고 고쳤으므로 새 표본의 정확도는 아닙니다. 조건 수는 점수에 조건 범주 수를 쓰고 정답표는 요건 수를 세므로 일치율이 낮습니다. 가중치 확정 근거는 [가중치 민감도 점검](weight_check.md)에 있습니다.", "",
                   "## 산출물", "",
                   "- `summary.json`: 입력 SHA-256, 점수식 설정, 분모·지표·숫자 검사 내역.",
                   "- `predictions.csv`: 서비스·항목별 정답/규칙/AI와 비교 가능 여부. 빈 값은 정보 없음입니다.",

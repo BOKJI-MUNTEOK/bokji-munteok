@@ -1,6 +1,6 @@
 """단순 규칙(키워드) 추출기. AI 추출과 같은 모양의 결과를 내서 정확도를 비교하는 기준선으로 쓴다.
 
-일부러 단순하게 만든다. 예: 글에 '방문'이 있으면 방문 필수로 본다.
+일부러 단순하게 만든다. 방문 필수는 정답표 기준(eval/README.md)처럼 '방문 말고 다른 신청 수단이 없음'으로 본다.
 """
 import re
 
@@ -20,6 +20,8 @@ COND_PATTERNS = {
 DOC_HEADER = re.compile(r"(?:신청)?(?:구비|제출|필요|신청)\s*서류\s*[:：\]]?")
 DOC_ITEM = re.compile(r"(신청서|동의서|증명서|확인서|진단서|소견서|처방전|영수증|등본|초본|사본|신분증|통장|계약서|증서|증|서약서)")
 NOT_DOC = re.compile(r"검토|및 지급|제출|받고")  # 서류 이름이 아니라 절차 문장
+# 방문 말고 신청할 수 있는 수단. 하나라도 있으면 방문 필수가 아니다(eval/README.md visit_required 기준).
+ALT_METHOD = re.compile(r"우편|등기|전화|팩스|FAX|이메일|E-?mail|메일|인터넷|온라인|정부24|홈페이지|복지로|포털|누리집", re.I)
 
 
 def detect_online(svc: dict) -> bool:
@@ -30,7 +32,17 @@ def detect_online(svc: dict) -> bool:
 
 
 def detect_visit(svc: dict) -> bool:
-    return "방문" in (svc["apply_method_name"] + " " + svc["apply"])
+    """방문 말고 다른 신청 수단(온라인·우편·전화·이메일·팩스)이 하나도 없으면 방문 필수."""
+    if detect_online(svc):
+        return False
+    text = svc["apply_method_name"] + " " + svc["apply"]
+    if ALT_METHOD.search(text):
+        return False
+    if svc["src"] == "중앙":
+        # 중앙 원문은 '방문'이라는 말 없이 신청 기관(주민센터 등)만 적는다. 신청 단계가 있으면 그 기관에 가야 한다.
+        # '이의신청접수' 단계는 신청 단계가 아니다.
+        return any(a["stage"].startswith("신청") for a in svc["agencies"])
+    return "방문" in text
 
 
 def detect_agencies(svc: dict) -> list[str]:

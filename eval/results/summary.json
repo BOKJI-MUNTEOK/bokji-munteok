@@ -16,7 +16,7 @@
       "rule": {
         "n": 50,
         "online": 96.0,
-        "visit_required": 48.0,
+        "visit_required": 100.0,
         "n_agencies": 82.0,
         "n_agencies_mae_n": 50,
         "n_agencies_mae": 0.2,
@@ -60,22 +60,22 @@
   "score_summary": {
     "전체": {
       "n": 50,
-      "mean": 45.64,
+      "mean": 47.2,
       "median": 48.0,
       "min": 29,
       "max": 67
     },
     "중앙": {
       "n": 25,
-      "mean": 40.44,
-      "median": 38,
+      "mean": 46.92,
+      "median": 48,
       "min": 29,
-      "max": 52
+      "max": 62
     },
     "지자체": {
       "n": 25,
-      "mean": 50.84,
-      "median": 52,
+      "mean": 47.48,
+      "median": 48,
       "min": 29,
       "max": 67
     }
@@ -85,13 +85,13 @@
       "servId": "WLF00000022",
       "service": "산재근로자 사회심리재활지원",
       "source": "중앙",
-      "score": 38
+      "score": 48
     },
     {
       "servId": "WLF00000023",
       "service": "농어가목돈마련저축 저축장려금 지급",
       "source": "중앙",
-      "score": 48
+      "score": 57
     },
     {
       "servId": "WLF00000024",
@@ -103,7 +103,7 @@
       "servId": "WLF00000025",
       "service": "장애인일자리지원",
       "source": "중앙",
-      "score": 52
+      "score": 62
     },
     {
       "servId": "WLF00000026",
@@ -115,7 +115,7 @@
       "servId": "WLF00000027",
       "service": "장애인 운전교육 사업",
       "source": "중앙",
-      "score": 38
+      "score": 48
     },
     {
       "servId": "WLF00000028",
@@ -145,19 +145,19 @@
       "servId": "WLF00000033",
       "service": "노인복지민간단체지원",
       "source": "중앙",
-      "score": 43
+      "score": 52
     },
     {
       "servId": "WLF00000035",
       "service": "개발제한구역 거주민 생활비용보조사업",
       "source": "중앙",
-      "score": 48
+      "score": 57
     },
     {
       "servId": "WLF00000036",
       "service": "주거취약계층 주거상향 지원사업",
       "source": "중앙",
-      "score": 38
+      "score": 48
     },
     {
       "servId": "WLF00000037",
@@ -169,61 +169,61 @@
       "servId": "WLF00000038",
       "service": "독립유공자 제수비 지급",
       "source": "중앙",
-      "score": 38
+      "score": 48
     },
     {
       "servId": "WLF00000040",
       "service": "선천성대사이상 검사 및 환아관리",
       "source": "중앙",
-      "score": 48
+      "score": 57
     },
     {
       "servId": "WLF00000041",
       "service": "어선원 및 어선 재해보상보험",
       "source": "중앙",
-      "score": 33
+      "score": 43
     },
     {
       "servId": "WLF00000043",
       "service": "보상금",
       "source": "중앙",
-      "score": 48
+      "score": 57
     },
     {
       "servId": "WLF00000044",
       "service": "생활안정자금(융자)",
       "source": "중앙",
-      "score": 48
+      "score": 57
     },
     {
       "servId": "WLF00000047",
       "service": "고혈압·당뇨병 등록관리사업",
       "source": "중앙",
-      "score": 38
+      "score": 48
     },
     {
       "servId": "WLF00000048",
       "service": "국가유공자등대부지원",
       "source": "중앙",
-      "score": 52
+      "score": 62
     },
     {
       "servId": "WLF00000049",
       "service": "에너지 취약계층 고효율조명기기 무상교체 지원(취약계층 에너지복지사업)",
       "source": "중앙",
-      "score": 48
+      "score": 57
     },
     {
       "servId": "WLF00000050",
       "service": "무공영예수당",
       "source": "중앙",
-      "score": 38
+      "score": 48
     },
     {
       "servId": "WLF00000051",
       "service": "고엽제환자2세수당",
       "source": "중앙",
-      "score": 43
+      "score": 52
     },
     {
       "servId": "WLF00000052",
@@ -235,13 +235,13 @@
       "servId": "WLF00000441",
       "service": "다문화가족 자녀 학습지원",
       "source": "지자체",
-      "score": 57
+      "score": 48
     },
     {
       "servId": "WLF00001634",
       "service": "보훈예우수당",
       "source": "지자체",
-      "score": 50
+      "score": 40
     },
     {
       "servId": "WLF00001710",
@@ -265,7 +265,7 @@
       "servId": "WLF00003424",
       "service": "해남군 장애인보조기기 수리비용 지원",
       "source": "지자체",
-      "score": 52
+      "score": 43
     },
     {
       "servId": "WLF00003430",
@@ -301,7 +301,7 @@
       "servId": "WLF00004763",
       "service": "해남형 청년 주거비 지원사업",
       "source": "지자체",
-      "score": 67
+      "score": 57
     },
     {
       "servId": "WLF00004802",
@@ -331,7 +331,7 @@
       "servId": "WLF00005942",
       "service": "청년 어학·자격 시험 응시료 지원사업",
       "source": "지자체",
-      "score": 48
+      "score": 38
     },
     {
       "servId": "WLF00006794",
@@ -343,7 +343,7 @@
       "servId": "WLF00006798",
       "service": "행복둥지 사랑의 집수리",
       "source": "지자체",
-      "score": 57
+      "score": 48
     },
     {
       "servId": "WLF00006799",
@@ -355,19 +355,19 @@
       "servId": "WLF00006800",
       "service": "장애어르신 쉼마루",
       "source": "지자체",
-      "score": 38
+      "score": 29
     },
     {
       "servId": "WLF00006801",
       "service": "장애인 체력단련센터 운영",
       "source": "지자체",
-      "score": 38
+      "score": 29
     },
     {
       "servId": "WLF00006802",
       "service": "광명시 시민정보화교육장",
       "source": "지자체",
-      "score": 38
+      "score": 29
     },
     {
       "servId": "WLF00006803",
@@ -765,7 +765,7 @@
       "source": "중앙",
       "field": "visit_required",
       "gold": true,
-      "rule": false,
+      "rule": true,
       "ai": true,
       "gold_eligible": true,
       "ai_available": true
@@ -820,7 +820,7 @@
       "source": "중앙",
       "field": "visit_required",
       "gold": true,
-      "rule": false,
+      "rule": true,
       "ai": true,
       "gold_eligible": true,
       "ai_available": true
@@ -930,7 +930,7 @@
       "source": "중앙",
       "field": "visit_required",
       "gold": true,
-      "rule": false,
+      "rule": true,
       "ai": true,
       "gold_eligible": true,
       "ai_available": true
@@ -1040,7 +1040,7 @@
       "source": "중앙",
       "field": "visit_required",
       "gold": true,
-      "rule": false,
+      "rule": true,
       "ai": false,
       "gold_eligible": true,
       "ai_available": true
@@ -1315,7 +1315,7 @@
       "source": "중앙",
       "field": "visit_required",
       "gold": true,
-      "rule": false,
+      "rule": true,
       "ai": false,
       "gold_eligible": true,
       "ai_available": true
@@ -1370,7 +1370,7 @@
       "source": "중앙",
       "field": "visit_required",
       "gold": true,
-      "rule": false,
+      "rule": true,
       "ai": true,
       "gold_eligible": true,
       "ai_available": true
@@ -1425,7 +1425,7 @@
       "source": "중앙",
       "field": "visit_required",
       "gold": true,
-      "rule": false,
+      "rule": true,
       "ai": true,
       "gold_eligible": true,
       "ai_available": true
@@ -1535,7 +1535,7 @@
       "source": "중앙",
       "field": "visit_required",
       "gold": true,
-      "rule": false,
+      "rule": true,
       "ai": false,
       "gold_eligible": true,
       "ai_available": true
@@ -1590,7 +1590,7 @@
       "source": "중앙",
       "field": "visit_required",
       "gold": true,
-      "rule": false,
+      "rule": true,
       "ai": true,
       "gold_eligible": true,
       "ai_available": true
@@ -1645,7 +1645,7 @@
       "source": "중앙",
       "field": "visit_required",
       "gold": true,
-      "rule": false,
+      "rule": true,
       "ai": true,
       "gold_eligible": true,
       "ai_available": true
@@ -1700,7 +1700,7 @@
       "source": "중앙",
       "field": "visit_required",
       "gold": true,
-      "rule": false,
+      "rule": true,
       "ai": false,
       "gold_eligible": true,
       "ai_available": true
@@ -1755,7 +1755,7 @@
       "source": "중앙",
       "field": "visit_required",
       "gold": true,
-      "rule": false,
+      "rule": true,
       "ai": true,
       "gold_eligible": true,
       "ai_available": true
@@ -1810,7 +1810,7 @@
       "source": "중앙",
       "field": "visit_required",
       "gold": true,
-      "rule": false,
+      "rule": true,
       "ai": true,
       "gold_eligible": true,
       "ai_available": true
@@ -1865,7 +1865,7 @@
       "source": "중앙",
       "field": "visit_required",
       "gold": true,
-      "rule": false,
+      "rule": true,
       "ai": true,
       "gold_eligible": true,
       "ai_available": true
@@ -1920,7 +1920,7 @@
       "source": "중앙",
       "field": "visit_required",
       "gold": true,
-      "rule": false,
+      "rule": true,
       "ai": true,
       "gold_eligible": true,
       "ai_available": true
@@ -1975,7 +1975,7 @@
       "source": "중앙",
       "field": "visit_required",
       "gold": true,
-      "rule": false,
+      "rule": true,
       "ai": true,
       "gold_eligible": true,
       "ai_available": true
@@ -2030,7 +2030,7 @@
       "source": "중앙",
       "field": "visit_required",
       "gold": true,
-      "rule": false,
+      "rule": true,
       "ai": true,
       "gold_eligible": true,
       "ai_available": true
@@ -2140,7 +2140,7 @@
       "source": "지자체",
       "field": "visit_required",
       "gold": false,
-      "rule": true,
+      "rule": false,
       "ai": false,
       "gold_eligible": true,
       "ai_available": true
@@ -2195,7 +2195,7 @@
       "source": "지자체",
       "field": "visit_required",
       "gold": false,
-      "rule": true,
+      "rule": false,
       "ai": false,
       "gold_eligible": true,
       "ai_available": true
@@ -2415,7 +2415,7 @@
       "source": "지자체",
       "field": "visit_required",
       "gold": false,
-      "rule": true,
+      "rule": false,
       "ai": false,
       "gold_eligible": true,
       "ai_available": true
@@ -2745,7 +2745,7 @@
       "source": "지자체",
       "field": "visit_required",
       "gold": false,
-      "rule": true,
+      "rule": false,
       "ai": false,
       "gold_eligible": true,
       "ai_available": true
@@ -3020,7 +3020,7 @@
       "source": "지자체",
       "field": "visit_required",
       "gold": false,
-      "rule": true,
+      "rule": false,
       "ai": false,
       "gold_eligible": true,
       "ai_available": true
@@ -3130,7 +3130,7 @@
       "source": "지자체",
       "field": "visit_required",
       "gold": false,
-      "rule": true,
+      "rule": false,
       "ai": false,
       "gold_eligible": true,
       "ai_available": true
@@ -3240,7 +3240,7 @@
       "source": "지자체",
       "field": "visit_required",
       "gold": false,
-      "rule": true,
+      "rule": false,
       "ai": false,
       "gold_eligible": true,
       "ai_available": true
@@ -3295,7 +3295,7 @@
       "source": "지자체",
       "field": "visit_required",
       "gold": false,
-      "rule": true,
+      "rule": false,
       "ai": false,
       "gold_eligible": true,
       "ai_available": true
@@ -3350,7 +3350,7 @@
       "source": "지자체",
       "field": "visit_required",
       "gold": false,
-      "rule": true,
+      "rule": false,
       "ai": false,
       "gold_eligible": true,
       "ai_available": true

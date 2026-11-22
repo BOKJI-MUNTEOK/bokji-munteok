@@ -861,7 +861,7 @@ def reset_weights():
 
 
 def weights():
-    with st.expander("가중치 조절 (팀 결정 전 안)", icon=":material/tune:"):
+    with st.expander("가중치 바꿔 보기 (확정값 기준)", icon=":material/tune:"):
         c = st.columns(3)
         for i, k in enumerate(score.DEFAULT_WEIGHTS):
             if f"_w_{k}" not in st.session_state:  # 다른 페이지에 다녀와도 값 유지

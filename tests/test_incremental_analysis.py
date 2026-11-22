@@ -56,12 +56,23 @@ class TestIncrementalAnalysis(unittest.TestCase):
         # 저장 당시 점수 이유가 이전 문구여도 현재 점수식으로 표시한다.
         for s in services:
             s["stored_analysis"].update(score=999, reason="이전 버전 설명")
-        with patch("rules.extract", side_effect=AssertionError("저장된 추출값 재사용 실패")), \
+        # 버전 없는 저장 결과는 규칙이 그 시점과 같을 때만 쓴다. 그 상황을 직접 만든다.
+        with patch("analysis_cache.LEGACY_FEATURE_VERSION", analysis_cache.FEATURE_VERSION), \
+                patch("rules.extract", side_effect=AssertionError("저장된 추출값 재사용 실패")), \
                 patch("score.readability", side_effect=AssertionError("저장된 난이도 재사용 실패")):
             rows = pipeline.build(services=services)
         actual = {r["svc"]["servId"]: r for r in rows}
         for s, original in zip(services, expected):
             self.assertEqual({k: actual[s["servId"]][k] for k in original}, original)
+
+    def test_legacy_db_features_are_reanalyzed_after_rule_change(self):
+        service = self.stored(self.services[1], legacy=True)
+        service["stored_analysis"]["ext"]["visit_required"] = not rules.extract(service)["visit_required"]
+        with patch("analysis_cache.LEGACY_FEATURE_VERSION", "이전 규칙"), \
+                patch("rules.extract", wraps=rules.extract) as extract:
+            row = pipeline.build(services=[service])[0]
+        self.assertEqual(extract.call_count, 1)
+        self.assertEqual(row["ext"], rules.extract(service))
 
     def test_add_modify_delete_only_analyzes_new_content(self):
         services = deepcopy(self.services)
