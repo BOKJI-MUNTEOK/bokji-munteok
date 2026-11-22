@@ -165,11 +165,11 @@ python src/sample_report.py  # API 키·DB·유료 AI 호출 없이 결과 재�
 | 자료 | 링크 |
 | --- | --- |
 | 프로젝트 계획서 | [docs/project-plan.md](docs/project-plan.md) |
-| 발표자료 PPT | 미정 (`docs/presentation/`에 올릴 예정) |
+| 발표자료 PPT | [docs/presentation/final-presentation.pptx](docs/presentation/final-presentation.pptx) (2026-11-24 기말 발표) |
 
 ## 6. 시연 동영상
 
-- YouTube: 미정
+- YouTube: https://youtu.be/0btVZg8UhJk (2분, 2026-11-22 녹화)
 - 영상 구성: [docs/demo-script.md](docs/demo-script.md)
 
 ## 7. 팀원 소개
