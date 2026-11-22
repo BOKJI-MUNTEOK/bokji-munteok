@@ -118,6 +118,14 @@ class TestMine(unittest.TestCase):
         self.assertIsNone(match.match(svc, life=["청년"], age=22))  # 30세 이상인데 22세
         self.assertEqual(match.match(svc, life=["청년"], age=35), ["청년"])
         self.assertEqual(match.age_range("39세 이하 구민, 만 19세 미만 제외"), (None, 39))
+        # 청년월세 지원사업: 예외 설명의 '30세 이상'·'30세 미만'만 읽어 아무도 못 받는 범위가 되던 문제
+        rent = ("19세~34세 독립거주 무주택 청년 중 청년가구 소득이 기준 중위소득 60% 이하인 청년을 지원합니다. "
+                "※ ① 30세 이상, ②혼인(이혼), ③미혼부·모, ④ 30세 미만 미혼 청년의 소득이 중위소득 50% 이상")
+        self.assertEqual(match.age_range(rent), (None, None))
+        self.assertEqual(match.match(dict(svc, life=["청년"], target=rent), life=["청년"], age=22), ["청년"])
+        self.assertIsNone(match.match(dict(svc, life=["청년"], target=rent), life=["중장년"], age=40))  # 생애주기로 걸러진다
+        # 청소년·어르신을 함께 적은 글(화성시 무상교통 등)은 어느 쪽도 빼지 않는다
+        self.assertEqual(match.age_range("만 65세 이상 어르신과 만 23세 이하 아동·청소년"), (None, None))
         kid = dict(svc, life=["아동"], target="12세 이하 아동")  # 부모가 신청하는 서비스는 나이로 거르지 않는다
         self.assertEqual(match.match(kid, life=["아동"], age=40), ["아동"])
 
