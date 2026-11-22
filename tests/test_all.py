@@ -66,6 +66,21 @@ class TestRules(unittest.TestCase):
         self.assertTrue(rules.detect_visit(svc))
         self.assertFalse(rules.detect_online(svc))
 
+    def test_visit_needs_no_other_method(self):
+        # 정답표 기준: 방문 말고 우편·전화·이메일·팩스·온라인 중 하나라도 있으면 방문 필수가 아니다.
+        local = {"src": "지자체", "apply_method_name": "방문", "apply": "읍면사무소에 신청", "online_flag": None}
+        self.assertTrue(rules.detect_visit(local))
+        for other in ("방문, 우편", "방문, 전화", "방문, E-mail", "방문, 팩스"):
+            self.assertFalse(rules.detect_visit({**local, "apply_method_name": other}), other)
+        # 중앙 원문은 '방문'이라는 말 없이 신청 기관만 적는다. 온라인 신청이 안 되고 신청 단계가 있으면 방문 필수.
+        central = {"src": "중앙", "apply_method_name": "", "online_flag": False,
+                   "apply": "신청기관연락처목록: 거주지 읍/면/동 주민센터에서 '서비스 신청'",
+                   "agencies": [{"stage": "신청기관연락처목록", "desc": ""}, {"stage": "이의신청접수기관연락처목록", "desc": ""}]}
+        self.assertTrue(rules.detect_visit(central))
+        self.assertFalse(rules.detect_visit({**central, "online_flag": True}))
+        self.assertFalse(rules.detect_visit({**central, "agencies": central["agencies"][1:]}))  # 이의신청만 있음
+        self.assertFalse(rules.detect_visit({**central, "apply": central["apply"] + ", 임신육아종합포털 아이사랑"}))
+
 
 class TestEvaluate(unittest.TestCase):
     def test_compare(self):
