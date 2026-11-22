@@ -146,6 +146,9 @@ class Helpers(unittest.TestCase):
         for label in ("주    소\n(주민등록상)", "주소(현 거주지)", "주 소 (도로명주소)"):
             self.assertEqual(fm.match_label(label, profile=prof).field_key, "applicant.address", label)
         self.assertEqual(fm.match_label("주    소\n(주민등록상)", section="proxy", profile=prof).action, "skip")
+        # 처분 사전 통지서의 '의견제출 / 제출처 / 기관명·부서명·담당자 / 주소·전화번호'는 기관 연락처 칸이다.
+        self.assertEqual(fm.detect_section_context("제출처", current="keep"), "excluded")
+        self.assertEqual(fm.detect_section_context("의견 제출처", current="keep"), "excluded")
 
     def test_decide_kind_from_content(self):
         """운영 DB 첨부 5,358개 내용 검증으로 정한 기준."""
