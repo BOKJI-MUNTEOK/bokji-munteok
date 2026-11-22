@@ -3,6 +3,9 @@
 1. 로컬 정리: 붙여 쓴 '시·도 / 시·군·구 / 도로명 / 건물번호 / 동·호'를 띄어 쓴다.
 2. AI 검수(선택, LLM_API_KEY): 띄어쓰기·오타만 고친다. 없는 동·호수를 만들지 않는다.
 3. 도로명주소 검색(선택, JUSO_API_KEY): 행정안전부 도로명주소 API로 실제 주소 후보를 찾는다.
+   해외 서버(Streamlit Community Cloud)에서는 도로명주소 API 연결이 시간 초과로 막힌다. 서버 검색이 연결
+   문제로 실패하면 결과에 browser_search를 담아 돌려주고, 화면이 사용자 브라우저에서 같은 API를 불러
+   apply_browser_result로 마저 처리한다(도로명주소 API는 브라우저 호출을 허용한다).
 
 외부 호출은 사용자가 '주소 확인하기'를 눌렀을 때 주소 한 줄만 보낸다. 이름·연락처는 보내지 않는다.
 키가 없거나 호출이 실패하면 그 단계만 건너뛰고 로컬 정리 결과를 돌려준다.
@@ -12,6 +15,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import time
 import urllib.parse
 import urllib.request
 
@@ -19,6 +23,9 @@ from env import load_env
 
 JUSO_URL = "https://business.juso.go.kr/addrlink/addrLinkApi.do"
 MAX_LEN = 200
+# 서버에서 도로명주소 API 연결이 실패하면 이 시간 동안은 서버 검색을 건너뛰고 바로 브라우저 검색으로 넘긴다.
+SERVER_RETRY_SEC = 600
+_server_down_until = 0.0
 
 SIDO = ("서울특별시", "부산광역시", "대구광역시", "인천광역시", "광주광역시", "대전광역시", "울산광역시",
         "세종특별자치시", "경기도", "강원특별자치도", "충청북도", "충청남도", "전북특별자치도", "전라남도",
@@ -139,33 +146,62 @@ def _invented_numbers(before: str, after: str) -> bool:
     return not set(re.findall(r"\d+", after)) <= set(re.findall(r"\d+", before))
 
 
-def search_juso(keyword: str, *, opener=None, limit: int = 5) -> list[dict] | None:
-    """도로명주소 API 검색. 키가 없거나 실패하면 None, 결과가 없으면 빈 목록."""
+def juso_key() -> str:
     load_env()
-    key = os.environ.get("JUSO_API_KEY", "").strip()
-    keyword = re.sub(r"[%=><\[\]]", " ", keyword or "").strip()[:80]
-    if not key or len(keyword) < 2:
-        return None
-    query = urllib.parse.urlencode({"confmKey": key, "currentPage": 1, "countPerPage": limit,
-                                    "keyword": keyword, "resultType": "json"})
+    return os.environ.get("JUSO_API_KEY", "").strip()
+
+
+def juso_keyword(keyword: str) -> str:
+    return re.sub(r"[%=><\[\]]", " ", keyword or "").strip()[:80]
+
+
+def parse_juso(data, limit: int = 5) -> list[dict] | None:
+    """도로명주소 API 응답(JSON)을 후보 목록으로 바꾼다. 오류 응답이면 None."""
     try:
-        with (opener or urllib.request.urlopen)(f"{JUSO_URL}?{query}", timeout=8) as r:
-            data = json.load(r)
         common = data["results"]["common"]
         if common.get("errorCode") != "0":
             # 운영 로그에서 원인을 볼 수 있게 오류 코드만 남긴다(주소·키는 남기지 않는다).
             print(f"[juso] errorCode={common.get('errorCode')}", flush=True)
             return None
         rows = data["results"].get("juso") or []
-    except Exception as exc:
-        print(f"[juso] {type(exc).__name__}: {str(exc)[:80].replace(key, '***')}", flush=True)
+    except (KeyError, TypeError, AttributeError):
         return None
     return [{"road": str(j.get("roadAddrPart1") or j.get("roadAddr") or "").strip(),
              "jibun": str(j.get("jibunAddr") or "").strip(),
              "zip": str(j.get("zipNo") or "").strip(),
              "rn": str(j.get("rn") or "").strip(),
              "number": "-".join(x for x in (str(j.get("buldMnnm") or "").strip(), str(j.get("buldSlno") or "").strip())
-                                if x and x != "0")} for j in rows[:limit] if j.get("roadAddr")]
+                                if x and x != "0")} for j in rows[:limit] if isinstance(j, dict) and j.get("roadAddr")]
+
+
+def search_juso(keyword: str, *, opener=None, limit: int = 5) -> list[dict] | None:
+    """도로명주소 API 검색. 키가 없거나 실패하면 None, 결과가 없으면 빈 목록."""
+    return _search(keyword, opener, limit)[0]
+
+
+def _search(keyword: str, opener, limit: int) -> tuple[list[dict] | None, bool]:
+    """(검색 결과, 서버에서 API에 연결하지 못했는지)."""
+    global _server_down_until
+    key = juso_key()
+    keyword = juso_keyword(keyword)
+    if not key or len(keyword) < 2:
+        return None, False
+    if opener is None and time.time() < _server_down_until:
+        return None, True
+    query = urllib.parse.urlencode({"confmKey": key, "currentPage": 1, "countPerPage": limit,
+                                    "keyword": keyword, "resultType": "json"})
+    try:
+        with (opener or urllib.request.urlopen)(f"{JUSO_URL}?{query}", timeout=5) as r:
+            data = json.load(r)
+    except OSError as exc:  # 시간 초과·연결 거부(URLError 포함)
+        print(f"[juso] {type(exc).__name__}: {str(exc)[:80].replace(key, '***')}", flush=True)
+        if opener is None:
+            _server_down_until = time.time() + SERVER_RETRY_SEC
+        return None, True
+    except Exception as exc:
+        print(f"[juso] {type(exc).__name__}: {str(exc)[:80].replace(key, '***')}", flush=True)
+        return None, False
+    return parse_juso(data, limit), False
 
 
 def exact_matches(keyword: str, rows: list[dict]) -> tuple[list[dict], bool]:
@@ -181,7 +217,8 @@ def exact_matches(keyword: str, rows: list[dict]) -> tuple[list[dict], bool]:
 
 
 def check(address: str, *, chat=None, opener=None) -> dict:
-    """주소 확인 전체 흐름. 화면은 결과의 suggestion/candidates만 보여 준다."""
+    """주소 확인 전체 흐름. 화면은 결과의 suggestion/candidates만 보여 준다.
+    서버에서 도로명주소 검색을 못 했고 키가 있으면 browser_search(브라우저에서 찾을 검색어)를 함께 돌려준다."""
     original = re.sub(r"[\s　]+", " ", str(address or "")).strip()[:MAX_LEN]
     result = {"original": original, "suggestion": tidy(original), "candidates": [], "detail": "",
               "ai_used": False, "juso_used": False, "verified": False, "notes": []}
@@ -195,22 +232,60 @@ def check(address: str, *, chat=None, opener=None) -> dict:
     else:
         result["notes"].append("AI 검수를 쓰지 못해 기본 띄어쓰기 정리만 했습니다.")
     result["detail"] = detail
-    found = search_juso(keyword, opener=opener, limit=10)
-    if review and found == []:
-        # AI가 고친 검색어로 못 찾으면 입력을 규칙으로만 정리한 검색어로 한 번 더 찾는다.
-        local_keyword, local_detail = split_detail(original)
-        if local_keyword != keyword:
-            found = search_juso(local_keyword, opener=opener, limit=10)
-            if found:
-                keyword, detail = local_keyword, local_detail
-                result["detail"] = detail
+    # AI가 고친 검색어로 못 찾으면 입력을 규칙으로만 정리한 검색어로 한 번 더 찾는다.
+    tries = [(keyword, detail)]
+    if review:
+        local = split_detail(original)
+        if local[0] != keyword:
+            tries.append(local)
+    found, unreachable = _search(keyword, opener, 10)
+    if found == [] and len(tries) > 1:
+        found = search_juso(tries[1][0], opener=opener, limit=10)
+        if found:
+            keyword, detail = tries[1]
+    if found is None:
+        if unreachable:
+            result["browser_search"] = [{"keyword": juso_keyword(k), "detail": d} for k, d in tries
+                                        if len(juso_keyword(k)) >= 2]
+        result["notes"].append(NOTE_NO_JUSO)
+        return result
+    return _apply_found(result, keyword, detail, found)
+
+
+NOTE_NO_JUSO = "도로명주소 검색을 쓰지 못해 실제 주소인지 확인하지 못했습니다."
+
+
+def browser_request(result: dict) -> dict | None:
+    """화면이 브라우저에서 도로명주소 API를 부를 때 쓸 값. 브라우저 검색이 필요 없으면 None."""
+    tries = result.get("browser_search") or []
+    key = juso_key()
+    if not tries or not key:
+        return None
+    return {"url": JUSO_URL, "key": key, "count": 10, "keywords": [t["keyword"] for t in tries]}
+
+
+def apply_browser_result(result: dict, reply) -> dict:
+    """브라우저가 받아 온 도로명주소 API 응답으로 결과를 마저 채운다.
+    reply: {"keyword": 찾은 검색어, "data": API 응답 JSON 또는 None, "error": 실패 이름}"""
+    tries = result.get("browser_search") or []
+    done = {k: v for k, v in result.items() if k != "browser_search"}
+    done["notes"] = list(result.get("notes") or [])
+    reply = reply if isinstance(reply, dict) else {}
+    keyword = str(reply.get("keyword") or "")
+    detail = next((t["detail"] for t in tries if t["keyword"] == keyword), None)
+    found = parse_juso(reply.get("data"), 10) if detail is not None and reply.get("data") else None
+    if found is None:
+        return done  # 브라우저에서도 못 찾았다: '도로명주소 검색을 쓰지 못해' 안내를 그대로 둔다.
+    done["notes"] = [n for n in done["notes"] if n != NOTE_NO_JUSO]
+    done["detail"] = detail
+    return _apply_found(done, keyword, detail, found)
+
+
+def _apply_found(result: dict, keyword: str, detail: str, found: list[dict]) -> dict:
     exact = True
     if found:
         found, exact = exact_matches(keyword, found)
         found = found[:5]
-    if found is None:
-        result["notes"].append("도로명주소 검색을 쓰지 못해 실제 주소인지 확인하지 못했습니다.")
-        return result
     result["juso_used"] = True
     # 도로명주소 검색으로 확인했으면 AI 검수를 못 쓴 것은 사용자가 알 필요 없다.
     result["notes"] = [n for n in result["notes"] if not n.startswith("AI 검수를")]

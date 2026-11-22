@@ -24,7 +24,7 @@ LLM_API_KEY = "..."   # 선택: AI 상담·쉬운 설명·서류 안내
 JUSO_API_KEY = "..."  # 선택: 도로명주소 검색
 ```
 
-`src/env.py`가 최상위 Secrets 값을 읽습니다. 웹이 공식 복지 API를 수집하지 않으므로 공공데이터 키 세 개는 웹에 넣을 필요가 없습니다. `LLM_API_KEY`가 없으면 규칙 상담과 공식 안내를 사용하고, `JUSO_API_KEY`가 없으면 주소 API 검증 없이 서류를 작성합니다.
+`src/env.py`가 최상위 Secrets 값을 읽습니다. 웹이 공식 복지 API를 수집하지 않으므로 공공데이터 키 세 개는 웹에 넣을 필요가 없습니다. `LLM_API_KEY`가 없으면 규칙 상담과 공식 안내를 사용하고, `JUSO_API_KEY`가 없으면 주소 API 검증 없이 서류를 작성합니다. Streamlit Cloud 서버는 도로명주소 API에 연결하지 못하므로(해외 접속 시간 초과), 주소 검색은 사용자 브라우저에서 이 키로 대신 호출합니다([주소 확인](document-preview.md#주소-확인도로명주소-검색-api)).
 
 `requirements.txt`는 Python 의존성, `packages.txt`는 Java JDK를 설치합니다. HWP 자동 기입은 첫 사용 때 `hwplib` JAR의 SHA-256을 확인하고 Java 도구를 컴파일하며, 이후 같은 실행 환경에서는 준비된 파일을 재사용합니다. 실패하면 원본 서식을 보존하는 기존 처리를 따릅니다. Streamlit Cloud는 Dockerfile을 실행하지 않습니다.
 

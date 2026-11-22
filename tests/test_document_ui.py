@@ -251,6 +251,38 @@ document_ui.render_document_workspace({row!r}, st.session_state.get('me'))
         self.assertFalse(at.radio)
         self.assertNotIn("dw_addrcheck_UI_TEST", at.session_state)
 
+    def test_browser_search_when_server_cannot_reach_juso(self):
+        """해외 서버에서 도로명주소 API가 막히면 브라우저 응답을 기다렸다가 같은 화면으로 보여 준다."""
+        result = {"original": "서울 강남구 테헤란로123", "suggestion": "서울특별시 강남구 테헤란로 123", "detail": "",
+                  "candidates": [], "ai_used": False, "juso_used": False, "verified": False,
+                  "notes": [document_ui.address_check.NOTE_NO_JUSO],
+                  "browser_search": [{"keyword": "서울특별시 강남구 테헤란로 123", "detail": ""}]}
+        request = {"url": "https://example.test", "key": "k", "count": 10, "keywords": ["서울특별시 강남구 테헤란로 123"]}
+        body = {"results": {"common": {"errorCode": "0"}, "juso": [
+            {"roadAddr": "서울특별시 강남구 테헤란로 123 (역삼동)", "roadAddrPart1": "서울특별시 강남구 테헤란로 123",
+             "rn": "테헤란로", "buldMnnm": "123", "buldSlno": "0", "zipNo": "06133", "jibunAddr": "역삼동 648-23"}]}}
+        reply = {}
+        with patch.object(document_ui.address_check, "check", return_value=result), \
+                patch.object(document_ui.address_check, "browser_request", return_value=request), \
+                patch.object(document_ui, "_juso_browser", side_effect=lambda **kw: reply) as browser:
+            at = self.opened()
+            at.text_input(key="dw_address_UI_TEST").input("서울 강남구 테헤란로123").run()
+            at.button(key="dw_addrbtn_UI_TEST").click().run()
+            self.assertFalse(at.exception)
+            self.assertEqual(browser.call_args.kwargs["data"], request)
+            self.assertTrue(any("찾고 있어요" in c.value for c in at.caption))
+            self.assertFalse(at.radio)
+            reply["reply"] = {"keyword": "서울특별시 강남구 테헤란로 123", "data": body, "error": ""}
+            at.run()
+            self.assertFalse(at.exception)
+            self.assertTrue(any("도로명주소에서 확인한 주소입니다" in s.value for s in at.success))
+            self.assertNotIn("browser_search", at.session_state["dw_addrcheck_UI_TEST"])
+            calls = browser.call_count
+            at.run()
+            self.assertEqual(browser.call_count, calls)  # 응답을 받은 뒤에는 다시 찾지 않는다.
+            at.button(key="dw_addrapply_UI_TEST").click().run()
+        self.assertEqual(at.text_input(key="dw_address_UI_TEST").value, "서울특별시 강남구 테헤란로 123")
+
     def test_address_check_failure_does_not_break_page(self):
         with patch.object(document_ui.address_check, "check", side_effect=RuntimeError("PRIVATE")):
             at = self.opened()

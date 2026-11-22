@@ -24,6 +24,40 @@ MIMES = {"pdf": "application/pdf", "hwp": "application/x-hwp", "hwpx": "applicat
 ONLINE_SITES = [("정부24", "https://www.gov.kr"), ("홈택스", "https://www.hometax.go.kr"),
                 ("전자가족관계등록시스템", "https://efamily.scourt.go.kr"), ("복지로", "https://www.bokjiro.go.kr")]
 
+# 해외 서버에서 도로명주소 API가 막혔을 때 사용자 브라우저에서 같은 API를 불러 응답을 돌려준다.
+# 검색어를 차례로 넣어 보고, 결과가 있거나 마지막 검색어까지 해 본 응답을 한 번만 보낸다.
+JUSO_BROWSER_JS = """
+export default function ({ data, setStateValue }) {
+  if (!data || !Array.isArray(data.keywords)) return;
+  const tag = JSON.stringify(data.keywords);
+  if (window.__bokjiJuso === tag) return;
+  window.__bokjiJuso = tag;
+  (async () => {
+    let reply = { keyword: data.keywords[0] || "", data: null, error: "" };
+    for (const keyword of data.keywords) {
+      const q = new URLSearchParams({ confmKey: data.key, currentPage: "1", countPerPage: String(data.count),
+                                      keyword, resultType: "json" });
+      const ctl = new AbortController();
+      const timer = setTimeout(() => ctl.abort(), 8000);
+      try {
+        const r = await fetch(data.url + "?" + q.toString(), { signal: ctl.signal, credentials: "omit" });
+        const body = await r.json();
+        reply = { keyword, data: body, error: "" };
+        if (((body.results || {}).juso || []).length) break;
+      } catch (e) {
+        reply = { keyword, data: null, error: String((e && e.name) || "Error") };
+        break;
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+    window.__bokjiJuso = "";
+    setStateValue("reply", reply);
+  })();
+}
+"""
+_juso_browser = st.components.v2.component("bokji_juso_browser", js=JUSO_BROWSER_JS)
+
 
 def _drop_output(state: dict) -> None:
     state.pop("prepared", None)
@@ -55,6 +89,10 @@ def _address_box(sid: str, address: str) -> None:
     if checked["original"] != re.sub(r"[\s\u3000]+", " ", address).strip():
         st.session_state.pop(result_key, None)  # 확인 뒤 주소를 고쳤다면 이전 결과는 맞지 않는다.
         return
+    if checked.get("browser_search"):
+        checked = _browser_search(sid, result_key, checked)
+        if checked.get("browser_search"):
+            return
     options = list(dict.fromkeys([c["full"] for c in checked["candidates"]] or [checked["suggestion"]]))
     if checked["verified"]:
         st.success("도로명주소에서 찾은 주소입니다. 맞는 주소를 골라 주세요." if len(options) > 1 else "도로명주소에서 확인한 주소입니다.")
@@ -68,6 +106,26 @@ def _address_box(sid: str, address: str) -> None:
     st.radio("바꿀 주소", options, key=f"dw_addrpick_{sid}", label_visibility="collapsed")
     # 서류 화면은 대화상자 안에 있다. st.rerun()은 대화상자를 닫으므로 클릭 콜백에서 값을 바꾼다.
     st.button("이 주소로 바꾸기", key=f"dw_addrapply_{sid}", width="stretch", on_click=_apply_address, args=(sid,))
+
+
+def _browser_search(sid: str, result_key: str, checked: dict) -> dict:
+    """서버가 도로명주소 API에 연결하지 못했으면 브라우저에서 찾고, 응답이 오면 결과를 마저 채운다."""
+    request = address_check.browser_request(checked)
+    if request is None:
+        done = address_check.apply_browser_result(checked, None)
+        st.session_state[result_key] = done
+        return done
+    # 같은 주소를 다시 확인할 때도 새로 찾도록 확인할 때마다 키를 바꾼다.
+    turn = st.session_state.setdefault(f"dw_addrturn_{sid}", 0)
+    reply = _juso_browser(key=f"dw_addrjuso_{sid}_{turn}", data=request,
+                          on_reply_change=lambda: None).get("reply")
+    if not reply:
+        st.caption("도로명주소에서 찾고 있어요.")
+        return checked
+    st.session_state[f"dw_addrturn_{sid}"] = turn + 1
+    done = address_check.apply_browser_result(checked, reply)
+    st.session_state[result_key] = done
+    return done
 
 
 def _apply_address(sid: str) -> None:
