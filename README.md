@@ -2,10 +2,10 @@
 
 빅데이터실습[YC] 기말 데이터분석 프로젝트 저장소입니다.
 
-> **최종 제출본 (2026-11-22 기준)**
+> **최종 제출본 (2026-11-24 기말 발표 기준)**
 > - 서비스: https://bokji-munteok.streamlit.app
 > - 시연 영상: https://youtu.be/0btVZg8UhJk
-> - 발표자료: [docs/presentation/final-presentation.pptx](docs/presentation/final-presentation.pptx) · 계획서: [docs/project-plan.md](docs/project-plan.md)
+> - 발표자료: [PDF로 보기](docs/presentation/final-presentation.pdf) · [PPT 원본](docs/presentation/final-presentation.pptx) · 계획서: [docs/project-plan.md](docs/project-plan.md)
 >
 > 한국사회보장정보원 복지서비스 API의 전체 목록(5,298건, 2026-11-22 집계)을 MongoDB에 저장해 하루 네 번 갱신합니다. 복지마다 신청 부담을 문턱 점수로 계산하고, AI 상담·쉬운 설명·신청서 자동 작성으로 신청 준비를 돕습니다.
 
@@ -174,6 +174,7 @@ python src/sample_report.py  # API 키·DB·유료 AI 호출 없이 결과 재�
 | --- | --- |
 | 프로젝트 계획서 | [docs/project-plan.md](docs/project-plan.md) |
 | 발표자료 PPT | [docs/presentation/final-presentation.pptx](docs/presentation/final-presentation.pptx) (2026-11-24 기말 발표) |
+| 발표자료 PDF | [docs/presentation/final-presentation.pdf](docs/presentation/final-presentation.pdf) (브라우저에서 바로 보기) |
 
 ## 6. 시연 동영상
 
